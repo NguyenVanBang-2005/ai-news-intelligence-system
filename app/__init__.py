@@ -1,0 +1,2 @@
+"""AI News Intelligence backend."""
+
