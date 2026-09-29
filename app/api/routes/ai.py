@@ -5,10 +5,6 @@ from app.schemas.ai import (
     AIProcessRequest,
     AIProcessResponse,
 )
-from app.services.topic_model import (
-    NotEnoughDocumentsError,
-    TopicModelService,
-)
 
 router = APIRouter(
     prefix="/ai",
@@ -24,6 +20,20 @@ def process_articles(
     payload: AIProcessRequest,
     db: DbSession,
 ) -> AIProcessResponse:
+    # Native ML dependencies are optional for starting the baseline API.
+    # Import here so a missing/blocked DLL cannot prevent app.main from loading.
+    try:
+        from app.services.topic_model import NotEnoughDocumentsError, TopicModelService
+    except (ImportError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "AI dependencies could not be loaded. Check the server's Python "
+                "environment and Windows Application Control logs. "
+                "RSS ingestion and baseline analysis remain available."
+            ),
+        ) from exc
+
     try:
         result = TopicModelService(db).process(
             limit=payload.limit,

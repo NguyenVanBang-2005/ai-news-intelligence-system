@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 class SourceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    feed_url: HttpUrl
+    feed_url: HttpUrl = Field(
+        description="Public RSS/Atom feed URL; HTML topic pages and article pages are unsupported."
+    )
     language: str = Field(default="en", min_length=2, max_length=10)
 
 

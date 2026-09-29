@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>AI Daily</title>
+    <link>https://ai-daily.example/</link>
+    <description>Fixture feed with messy real-world markup</description>
+
+    <item>
+      <title>OpenAI&#8217;s new GPT model &amp;amp; agents</title>
+      <link>  https://ai-daily.example/gpt-agents  </link>
+      <dc:creator><![CDATA[ <b>Jane</b>&nbsp;Doe ]]></dc:creator>
+      <pubDate>Mon, 28 Sep 2026 08:00:00 GMT</pubDate>
+      <description><![CDATA[
+        <div class="lead"><p>The   new <strong>language model</strong>&nbsp;ships
+        with&amp;nbsp;tool use.</p>
+        <script>trackPageView("gpt-agents");</script>
+        <style>.lead { color: red; }</style>
+        <p>It scores 92% on the &quot;AgentBench&quot; benchmark&#8230;<br/>Pricing:&#x20AC;20/month.</p>
+        <img src="https://ai-daily.example/hero.png" alt="hero"/>
+        <p>&#8203;&nbsp;</p></div>
+      ]]></description>
+    </item>
+
+    <item>
+      <title>Robotics startup raises $50M</title>
+      <link>https://ai-daily.example/robotics-funding</link>
+      <description>Short teaser only.</description>
+      <content:encoded><![CDATA[
+        <h2>Funding round</h2>
+        <p>A humanoid robot startup closed a $50M round.</p>
+        <ul><li>Lead investor: Example Capital</li><li>Valuation: undisclosed</li></ul>
+      ]]></content:encoded>
+    </item>
+
+    <item>
+      <title>Headline without any body</title>
+      <link>https://ai-daily.example/no-body</link>
+    </item>
+
+    <item>
+      <title>Body repeats the headline</title>
+      <link>https://ai-daily.example/repeat</link>
+      <description>&lt;p&gt;Body repeats the headline&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Markup-only body</title>
+      <link>https://ai-daily.example/markup-only</link>
+      <description><![CDATA[<p> &nbsp; </p><img src="x.png"/><script>ads()</script>]]></description>
+    </item>
+
+    <item>
+      <title>Entry without a link is ignored</title>
+      <description>No link, so it cannot be stored.</description>
+    </item>
+  </channel>
+</rss>

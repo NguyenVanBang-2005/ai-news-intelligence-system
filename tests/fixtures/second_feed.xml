@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>AI Weekly</title>
+    <link>https://ai-weekly.example/</link>
+    <description>Second fixture feed; shares one URL with ai_feed.xml</description>
+
+    <item>
+      <title>OpenAI's new GPT model (syndicated)</title>
+      <link>https://ai-daily.example/gpt-agents</link>
+      <description>Syndicated copy of an article already ingested.</description>
+    </item>
+
+    <item>
+      <title>EU publishes AI safety regulation guidance</title>
+      <link>https://ai-weekly.example/eu-guidance</link>
+      <description><![CDATA[<p>The government policy targets model safety.</p>]]></description>
+    </item>
+  </channel>
+</rss>

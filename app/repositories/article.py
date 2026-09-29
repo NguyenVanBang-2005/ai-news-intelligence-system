@@ -1,9 +1,34 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.article import Article
+
+
+class DuplicateArticleError(Exception):
+    """The article URL already exists (e.g. inserted concurrently after an exists check)."""
+
+
+# Name of the unique index SQLAlchemy creates for Article.url (unique=True, index=True).
+_URL_UNIQUE_CONSTRAINTS = {"ix_articles_url"}
+
+
+def is_url_unique_violation(exc: IntegrityError) -> bool:
+    """True only when the driver reports a unique violation on articles.url.
+
+    Unknown or unrecognized errors return False so the caller re-raises them.
+    """
+    orig = exc.orig
+    # SQLite: "UNIQUE constraint failed: articles.url" (exactly this one column).
+    if str(orig).strip() == "UNIQUE constraint failed: articles.url":
+        return True
+    # PostgreSQL (psycopg2/psycopg): SQLSTATE 23505 plus the violated index name.
+    if getattr(orig, "pgcode", None) == "23505" or getattr(orig, "sqlstate", None) == "23505":
+        diag = getattr(orig, "diag", None)
+        return getattr(diag, "constraint_name", None) in _URL_UNIQUE_CONSTRAINTS
+    return False
 
 
 class ArticleRepository:
@@ -16,8 +41,19 @@ class ArticleRepository:
     def create(self, **values: object) -> Article:
         article = Article(**values)
         self.db.add(article)
-        self.db.commit()
-        self.db.refresh(article)
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            # Only a unique violation on articles.url is a duplicate; anything else is re-raised.
+            if is_url_unique_violation(exc):
+                raise DuplicateArticleError(str(values["url"])) from exc
+            raise
+        except Exception:
+            self.db.rollback()
+            raise
+        # No refresh: the row is already committed, and a failing refresh must not make the
+        # caller believe the insert failed. Attributes reload lazily if the session expires them.
         return article
 
     def list(
@@ -32,7 +68,7 @@ class ArticleRepository:
         statement = (
             select(Article)
             .where(*filters)
-            .order_by(Article.published_at.desc(), Article.id.desc())
+            .order_by(Article.published_at.desc().nulls_last(), Article.id.desc())
             .limit(limit)
             .offset(offset)
         )
