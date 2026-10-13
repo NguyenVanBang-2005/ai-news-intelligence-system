@@ -40,6 +40,19 @@ uvicorn app.main:app --reload
 Mở `http://127.0.0.1:8000/docs`. API không tự tạo bảng; schema do Alembic quản lý.
 Dữ liệu SQLite cũ không tự động được import sang PostgreSQL.
 
+### Hai cách chạy API, hai cổng khác nhau
+
+| Cách chạy | Cổng | Swagger | Cấu hình DB |
+| --- | --- | --- | --- |
+| Docker Compose (`ainis_main`, `API_PORT=8001` trong `.env`) | 8001 | <http://127.0.0.1:8001/docs> | `POSTGRES_*`, migrate tự chạy |
+| `uvicorn app.main:app --reload` trên host | 8000 | <http://127.0.0.1:8000/docs> | `DATABASE_URL` trong `.env` |
+
+Hai tiến trình độc lập; chọn một cổng và dùng đúng Swagger của nó. Tiến trình trên host
+không tự migrate: nếu `POST /api/v1/sources` trả `500 Internal Server Error` dù payload
+hợp lệ, thường PostgreSQL chưa chạy (`docker compose up -d db`) hoặc database chưa có
+bảng (`UndefinedTable: relation "sources" does not exist`). Chạy `alembic upgrade head`
+với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal chạy uvicorn.
+
 ## Luồng thử nhanh
 
 1. `POST /api/v1/sources` với JSON:
@@ -73,6 +86,12 @@ Ví dụ tạo source bằng `POST /api/v1/sources`:
 }
 ```
 
+`feed_url` phải là địa chỉ RSS/Atom của nhà xuất bản (thường kết thúc `.xml`/`/feed`/`/rss`,
+hoặc lấy từ biểu tượng RSS của trang). Một URL bài viết như
+`https://news.mit.edu/2026/craig-rowe-soars-to-new-heights-1001` là trang HTML: POST vẫn
+trả 201 (chỉ kiểm tra cú pháp, không gọi mạng), nhưng ingestion báo `UnsupportedFeedError`
+trong `errors` và không tạo bài. Sửa bằng cách tạo source mới với URL RSS đúng.
+
 Lấy `id` trả về, gọi ingestion với ID đó. Dùng `GET /api/v1/sources` để kiểm tra
 URL thực sự được lưu; nếu POST trả 409, tìm source đã tồn tại và dùng ID của nó.
 Không cần xóa nguồn cũ để thử nguồn mới; xóa source sẽ xóa kèm các bài của nguồn.
@@ -91,6 +110,12 @@ và `duplicates_skipped=articles_seen`, các bài đã tồn tại, không phả
 ruff check .
 pytest --cov=app
 ```
+
+Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy chủ **thử**: đặt
+`TEST_POSTGRES_ADMIN_URL` trỏ tới database `postgres` của máy chủ đó (ví dụ stack
+`ainis_dockertest`, cổng 55432). Mỗi test tự tạo và xóa database `ainis_pytest_*` riêng,
+không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
+case PostgreSQL bị skip, phần SQLite vẫn chạy.
 
 ## Windows: lỗi DLL khi khởi động
 

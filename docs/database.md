@@ -41,6 +41,22 @@ docker compose run --rm migrate
 docker compose up -d api
 ```
 
+## Môi trường thử tách biệt
+
+Để thử mà không đụng `.env`, volume hoặc `backups` thật, tạo file env riêng (ví dụ
+`.docker-test/test.env`, đã nằm trong `.gitignore`) rồi đặt các biến sau trước khi chạy Compose:
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = "ainis_dockertest"   # volume/container riêng
+$env:APP_ENV_FILE = ".docker-test/test.env"      # env_file của service
+$env:BACKUP_DIR = "./.docker-test/backups"       # thư mục backup riêng
+docker compose --env-file .docker-test/test.env up -d --build
+```
+
+`--env-file` chỉ dùng để nội suy `compose.yaml`; `APP_ENV_FILE` quyết định file mà container thực sự nhận.
+Chạy `docker compose exec ... sh /ops/database.sh` từ PowerShell; Git Bash trên Windows tự đổi `/ops/...`
+thành đường dẫn Windows và làm lệnh lỗi (đặt `MSYS_NO_PATHCONV=1` nếu dùng Git Bash).
+
 ## Chạy Python trên host
 
 ```powershell
@@ -50,7 +66,7 @@ docker compose up -d db
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-`DATABASE_URL` trên host dùng `localhost` và port `POSTGRES_PORT`; trong container
+`DATABASE_URL` trên host dùng `127.0.0.1` (không dùng `localhost`: trên Windows nó thử IPv6 trước và chậm ~8 giây) và port `POSTGRES_PORT`; trong container
 Compose đặt `POSTGRES_HOST=db`, biến này được ưu tiên hơn `DATABASE_URL`. Nếu đổi user/password/database/port, cập
 nhật URL trên host tương ứng. API không tự tạo hay sửa bảng lúc khởi động.
 
@@ -114,3 +130,16 @@ restore thử và đọc dữ liệu mới xác nhận backup dùng được.
 
 Tham khảo: [Compose startup order](https://docs.docker.com/compose/how-tos/startup-order/),
 [Alembic](https://alembic.sqlalchemy.org/en/latest/tutorial.html).
+
+## Vận hành môi trường chính (project `ainis_main`)
+
+`.env` có `COMPOSE_PROJECT_NAME=ainis_main`, nên Compose tự dùng đúng project; vẫn nên thêm `-p ainis_main`
+để không vô tình dùng project khác (ví dụ `ainis_dockertest`). Volume dữ liệu: `ainis_main_postgres_data`.
+
+```powershell
+docker compose -p ainis_main up -d --build     # start
+docker compose -p ainis_main ps -a
+docker compose -p ainis_main logs -f api       # log
+docker compose -p ainis_main stop              # stop, giữ dữ liệu (KHÔNG dùng down -v)
+docker compose -p ainis_main exec -T db sh /ops/database.sh backup news-YYYYMMDD.dump
+```

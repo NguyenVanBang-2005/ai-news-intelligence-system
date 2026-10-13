@@ -19,3 +19,5 @@ backups
 *.sql
 dist
 tests
+.docker-test
+.env-backup

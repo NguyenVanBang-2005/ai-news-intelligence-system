@@ -1,7 +1,7 @@
 x-app: &app
   build: .
   image: ai-news-intelligence:local
-  env_file: .env
+  env_file: ${APP_ENV_FILE:-.env}
   environment:
     # The app builds (and URL-escapes) the connection URL from these; .env's DATABASE_URL
     # (localhost, for host-side Python) is ignored inside containers.
@@ -26,7 +26,7 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
+      - ${BACKUP_DIR:-./backups}:/backups
       - ./scripts:/ops:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]

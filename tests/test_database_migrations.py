@@ -158,3 +158,12 @@ def test_feed_dates_normalized_to_utc() -> None:
         })
         assert item.published_at == datetime(2026, 9, 29, tzinfo=UTC)
         assert item.published_at.utcoffset() == timedelta(0)
+
+
+def test_compose_allows_isolated_env_file_and_backup_dir() -> None:
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "env_file: ${APP_ENV_FILE:-.env}" in text
+    assert "${BACKUP_DIR:-./backups}:/backups" in text
