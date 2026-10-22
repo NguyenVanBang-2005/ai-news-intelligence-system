@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+
+import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,6 +37,9 @@ def is_url_unique_violation(exc: IntegrityError) -> bool:
 class ArticleRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    def get_by_url(self, url: str) -> Article | None:
+        return self.db.scalar(select(Article).where(Article.url == url).limit(1))
 
     def exists_by_url(self, url: str) -> bool:
         return self.db.scalar(select(Article.id).where(Article.url == url).limit(1)) is not None
@@ -77,22 +83,48 @@ class ArticleRepository:
     def get(self, article_id: int) -> Article | None:
         return self.db.get(Article, article_id)
 
-    def trending(self, limit: int) -> list[tuple[str, int]]:
-        statement = (
-            select(Article.topic, func.count(Article.id).label("article_count"))
-            .where(Article.topic.is_not(None))
-            .group_by(Article.topic)
-            .order_by(func.count(Article.id).desc())
-            .limit(limit)
-        )
-        return [(topic, count) for topic, count in self.db.execute(statement).all()]
+    def get_many(self, article_ids: set[int]) -> list[Article]:
+        if not article_ids:
+            return []
+        return list(self.db.scalars(select(Article).where(Article.id.in_(article_ids))))
 
-    def list_for_ai_processing(
+    def topic_counts(
         self,
         *,
-        limit: int,
-        force: bool = False,
-    ) -> list[Article]:
+        baseline_start: datetime,
+        window_start: datetime,
+        end: datetime,
+    ) -> list[tuple[str, int, int]]:
+        """Per topic: (topic, articles in [window_start, end], articles in
+        [baseline_start, window_start)).
+
+        An article's time is when it was published, or when it was collected
+        if the feed gave no date.
+        """
+        article_time = func.coalesce(Article.published_at, Article.created_at)
+        in_window = article_time >= window_start
+
+        statement = (
+            select(
+                Article.topic,
+                func.count(Article.id).filter(in_window),
+                func.count(Article.id).filter(~in_window),
+            )
+            .where(
+                Article.topic.is_not(None),
+                article_time >= baseline_start,
+                article_time <= end,
+            )
+            .group_by(Article.topic)
+        )
+
+        return [
+            (topic, recent_count, baseline_count)
+            for topic, recent_count, baseline_count in self.db.execute(statement).all()
+        ]
+
+    @staticmethod
+    def _ai_processing_filters(*, force: bool) -> list:
         filters = [
             Article.content != "",
         ]
@@ -100,14 +132,54 @@ class ArticleRepository:
         if not force:
             filters.append(Article.status != "ai_analyzed")
 
+        return filters
+
+    def count_for_ai_processing(self, *, limit: int, force: bool = False) -> int:
+        """How many articles list_for_ai_processing would return, without loading them."""
+        total = self.db.scalar(
+            select(func.count(Article.id)).where(*self._ai_processing_filters(force=force))
+        )
+        return min(total or 0, limit)
+
+    def list_for_ai_processing(
+        self,
+        *,
+        limit: int,
+        force: bool = False,
+    ) -> list[Article]:
         statement = (
             select(Article)
-            .where(*filters)
+            .where(*self._ai_processing_filters(force=force))
             .order_by(Article.created_at.asc())
             .limit(limit)
         )
 
         return list(self.db.scalars(statement))
+
+    def list_for_search(self, *, limit: int) -> list[Article]:
+        """The newest articles that have content to search in."""
+        statement = (
+            select(Article)
+            .where(Article.content != "")
+            .order_by(Article.created_at.desc(), Article.id.desc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(statement))
+
+    def save_content(self, article: Article, content: str) -> None:
+        article.content = content
+        article.status = "analyzed"
+        self.db.commit()
+
+    def save_ai_summary(self, article: Article, summary: str) -> None:
+        article.ai_summary = summary
+        self.db.commit()
+
+    def save_embeddings(self, entries: list[tuple[Article, str, np.ndarray]]) -> None:
+        for article, key, vector in entries:
+            article.cache_embedding(key, vector)
+
+        self.db.commit()
 
     def save_ai_results(
         self,

@@ -66,15 +66,32 @@ với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal ch�
 ```
 
 2. `POST /api/v1/ingestion/run` để lấy RSS và phân tích bài mới.
-3. Xem `GET /api/v1/articles` và `GET /api/v1/topics/trending`.
+3. Xem `GET /api/v1/articles` và `GET /api/v1/topics/trending`. Trending so sánh số bài
+   trong `window_hours` gần nhất (mặc định 24) với mức bình thường của `baseline_days`
+   ngày trước đó (mặc định 7); `trend_score` là số độ lệch chuẩn vượt mức bình thường.
 
-### Ingestion chỉ hỗ trợ RSS/Atom
+### Loại nguồn: RSS/Atom và News API
 
-`POST /api/v1/ingestion/run?source_id=ID` đọc `feed_url` của source đã lưu trong DB.
-Endpoint không nhận URL qua request body; bỏ `source_id` sẽ chạy mọi nguồn active.
-`HttpUrl` chỉ kiểm tra cú pháp URL khi tạo source, không xác nhận nội dung là feed.
-Trang danh sách HTML và URL bài viết đơn lẻ không được crawl. Class
-`ArticleContentExtractor` chưa được tích hợp vào ingestion.
+`POST /api/v1/ingestion/run?source_id=ID` thu thập bài mới từ source đã lưu; bỏ `source_id`
+sẽ chạy mọi nguồn active. Endpoint không nhận URL qua request body.
+
+- `type: "rss"` (mặc định): đọc `feed_url`. `HttpUrl` chỉ kiểm tra cú pháp khi tạo source,
+  không xác nhận nội dung là feed; trang HTML và URL bài viết đơn lẻ không được hỗ trợ.
+- `type: "news_api"`: tìm bài theo `query` qua GNews (https://gnews.io). Cần đặt
+  `NEWS_API_KEY` (gói miễn phí: tối đa 10 bài mỗi lần, khoảng 100 lần/ngày). Ví dụ:
+
+```json
+{
+  "name": "Toyota news",
+  "type": "news_api",
+  "query": "toyota",
+  "language": "en"
+}
+```
+
+- Full-text: khi nguồn chỉ có đoạn trích ngắn hơn `FULL_TEXT_MIN_CHARS` (mặc định 800 ký tự),
+  ingestion tải trang bài viết để lấy toàn văn; tải lỗi thì giữ đoạn trích. Tắt bằng
+  `INGESTION_FULL_TEXT=false`. Bật tính năng này làm ingestion chậm hơn vì phải tải từng bài.
 
 Ví dụ tạo source bằng `POST /api/v1/sources`:
 
@@ -116,6 +133,37 @@ Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy c
 `ainis_dockertest`, cổng 55432). Mỗi test tự tạo và xóa database `ainis_pytest_*` riêng,
 không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
 case PostgreSQL bị skip, phần SQLite vẫn chạy.
+
+## AI API
+
+- `POST /api/v1/ai/process` xếp một job chạy nền và trả `202` kèm `id` ngay. `409` nếu
+  chưa đủ bài (`AI_MIN_DOCUMENTS`) hoặc đang có job khác chạy; `503` nếu không nạp được thư viện ML.
+- `GET /api/v1/ai/process/{job_id}` trả `status` (`pending` → `running` → `succeeded` | `failed`),
+  `error` khi thất bại và `result` khi thành công. `result` gồm số liệu batch,
+  `confidence_method` (`hdbscan_soft` là điểm thật từ HDBSCAN; `fallback` là giá trị cố định 0.5)
+  và `topic_coherence` (NPMI trung bình, -1..1, càng cao càng tốt — so sánh giữa các batch
+  để biết đổi tham số có cải thiện không).
+- `GET /api/v1/ai/topics` liệt kê topic: `size`, `keywords` kèm trọng số và
+  `representative_articles` (bài gần tâm topic nhất).
+- Embedding của bài được lưu trong bảng `articles` (cột `embedding`, khóa theo model + nội dung),
+  nên chạy lại hoặc `force=true` chỉ encode bài mới hoặc bài đã đổi nội dung.
+- Job chạy bằng FastAPI `BackgroundTasks` trong cùng tiến trình: không tự retry, và job bị
+  gián đoạn khi server restart sẽ không chặn job mới sau `AI_JOB_TIMEOUT_SECONDS`.
+
+## Tìm kiếm tin tức (Q&A)
+
+Mở `http://localhost:8000/` để dùng trang tìm kiếm: nhập yêu cầu (ví dụ "EU AI Act") hoặc
+dán link bài báo rồi bấm Search. API tương ứng: `POST /api/v1/ai/ask` với `{"input": "..."}`.
+
+- Kết quả gồm danh sách bài nguồn (tiêu đề, link, nguồn, ngày, tóm tắt) và một đoạn tổng quan
+  có trích dẫn `[1]`, `[2]`. Chỉ tìm trong các bài đã thu thập từ RSS.
+- Link mới được tải về, lưu vào nguồn "User-submitted links" (không hoạt động, RSS bỏ qua) và
+  hiển thị đầu tiên cùng các bài liên quan.
+- LLM mặc định là Gemma chạy local qua Ollama (miễn phí): cài Ollama, chạy
+  `ollama pull <model>` và đặt `LLM_MODEL` đúng tên model đã tải (kiểm tra bằng `ollama list`).
+  Dùng OpenAI: đặt `LLM_BASE_URL=https://api.openai.com/v1`, `LLM_MODEL`, `LLM_API_KEY`.
+- Tóm tắt AI được lưu vào cột `articles.ai_summary` và dùng lại. Khi LLM không chạy, hệ thống
+  vẫn trả kết quả với đoạn trích (`summary_method: "extractive"`) và không có tổng quan.
 
 ## Windows: lỗi DLL khi khởi động
 

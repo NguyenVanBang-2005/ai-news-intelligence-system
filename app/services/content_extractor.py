@@ -1,10 +1,17 @@
 import re
+from dataclasses import dataclass
 from urllib.parse import urljoin
 
 import httpx
 import trafilatura
 
 from app.services.feed import validate_public_url
+
+
+@dataclass(frozen=True)
+class ExtractedPage:
+    title: str | None
+    text: str
 
 
 class ArticleContentExtractor:
@@ -22,6 +29,40 @@ class ArticleContentExtractor:
 
     def extract_from_url(self, url: str) -> str | None:
         """Return clean article text, or None if extraction fails."""
+
+        page = self.extract_page(url)
+
+        return page.text if page else None
+
+    def extract_page(self, url: str) -> ExtractedPage | None:
+        """Return the page title and clean article text, or None if extraction fails."""
+
+        html = self._download_html(url)
+
+        if html is None:
+            return None
+
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            include_links=False,
+            favor_precision=True,
+            output_format="txt",
+        )
+
+        if not text:
+            return None
+
+        metadata = trafilatura.extract_metadata(html)
+
+        return ExtractedPage(
+            title=metadata.title if metadata else None,
+            text=text,
+        )
+
+    def _download_html(self, url: str) -> str | None:
+        """Download an HTML page from a public address, or return None."""
 
         current_url = url
 
@@ -63,14 +104,7 @@ class ArticleContentExtractor:
                     if len(response.content) > self.max_download_bytes:
                         return None
 
-                    return trafilatura.extract(
-                        response.text,
-                        include_comments=False,
-                        include_tables=False,
-                        include_links=False,
-                        favor_precision=True,
-                        output_format="txt",
-                    )
+                    return response.text
 
         except (
             httpx.HTTPError,

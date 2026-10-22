@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.session import get_db
+from app.db.session import get_db, get_session_factory
 from app.main import app
 from tests.db_isolation import isolated_env
 
@@ -45,6 +45,7 @@ def client_for(eng: Engine, **kwargs: bool) -> Generator[TestClient]:
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_session_factory] = lambda: factory
     try:
         with TestClient(app, **kwargs) as client:
             yield client

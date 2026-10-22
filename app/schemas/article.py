@@ -29,5 +29,10 @@ class ArticlePage(BaseModel):
 
 class TrendingTopic(BaseModel):
     topic: str
+    # Articles about this topic in the recent window.
     article_count: int
+    # Articles a window of that length normally has, from the baseline days before it.
+    expected_count: float
+    # Standard deviations above normal; higher means a stronger burst.
+    trend_score: float
 

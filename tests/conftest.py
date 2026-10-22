@@ -12,6 +12,14 @@ from app.db.session import Base
 from tests.pg_support import ADMIN_URL, alembic_upgrade, client_for, requires_postgres
 
 
+@pytest.fixture(autouse=True)
+def no_full_text_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ingestion would download article pages; tests that need it pass a fake extractor."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ingestion_full_text", False)
+
+
 @pytest.fixture
 def new_postgres_db() -> Generator[Callable[[], str], None, None]:
     """Factory for empty, uniquely named PostgreSQL databases that are dropped afterwards."""

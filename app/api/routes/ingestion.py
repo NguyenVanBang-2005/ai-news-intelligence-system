@@ -11,8 +11,10 @@ router = APIRouter(prefix="/ingestion", tags=["ingestion"])
     "/run",
     response_model=IngestionResult,
     description=(
-        "Fetch RSS/Atom from the saved source.feed_url. Select a source_id or omit it "
-        "to process all active sources. This endpoint does not accept an article URL. "
+        "Collect new articles from saved sources: RSS/Atom sources read their feed_url, "
+        "news_api sources search their query. Short snippets are replaced by the full "
+        "article text when it can be downloaded. Select a source_id or omit it to "
+        "process all active sources. This endpoint does not accept an article URL. "
         "Per-source failures are returned in errors even when the batch returns HTTP 200."
     ),
 )

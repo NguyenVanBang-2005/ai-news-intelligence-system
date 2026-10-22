@@ -1,10 +1,22 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, SessionFactory
+from app.core.config import settings
+from app.repositories.ai_job import AIJobRepository
+from app.repositories.article import ArticleRepository
+from app.repositories.topic import TopicRepository
 from app.schemas.ai import (
+    AIJobRead,
     AIProcessRequest,
-    AIProcessResponse,
+    RepresentativeArticle,
+    TopicRead,
 )
+from app.services.ai_errors import (
+    AI_DEPENDENCIES_MISSING_MESSAGE,
+    NotEnoughDocumentsError,
+    check_enough_documents,
+)
+from app.services.ai_jobs import run_ai_job
 
 router = APIRouter(
     prefix="/ai",
@@ -14,54 +26,109 @@ router = APIRouter(
 
 @router.post(
     "/process",
-    response_model=AIProcessResponse,
+    response_model=AIJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def process_articles(
     payload: AIProcessRequest,
     db: DbSession,
-) -> AIProcessResponse:
+    session_factory: SessionFactory,
+    background_tasks: BackgroundTasks,
+) -> AIJobRead:
+    """Start processing in the background. Poll GET /ai/process/{job_id} for the outcome."""
+
     # Native ML dependencies are optional for starting the baseline API.
     # Import here so a missing/blocked DLL cannot prevent app.main from loading.
     try:
-        from app.services.topic_model import NotEnoughDocumentsError, TopicModelService
+        import app.services.topic_model  # noqa: F401
     except (ImportError, OSError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "AI dependencies could not be loaded. Check the server's Python "
-                "environment and Windows Application Control logs. "
-                "RSS ingestion and baseline analysis remain available."
-            ),
+            detail=AI_DEPENDENCIES_MISSING_MESSAGE,
         ) from exc
 
+    # Cheap checks first, so the caller learns right away about problems that
+    # a job could not fix.
     try:
-        result = TopicModelService(db).process(
-            limit=payload.limit,
-            duplicate_threshold=(
-                payload.duplicate_threshold
-            ),
-            force=payload.force,
+        check_enough_documents(
+            ArticleRepository(db).count_for_ai_processing(
+                limit=payload.limit,
+                force=payload.force,
+            )
         )
-
     except NotEnoughDocumentsError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
 
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "AI processing failed: "
-                f"{type(exc).__name__}: {exc}"
-            ),
-        ) from exc
+    jobs = AIJobRepository(db)
 
-    return AIProcessResponse(
-        documents_received=result.documents_received,
-        unique_documents=result.unique_documents,
-        semantic_duplicates=result.semantic_duplicates,
-        topics_created=result.topics_created,
-        articles_updated=result.articles_updated,
-    )
+    active_job = jobs.find_active(max_age_seconds=settings.ai_job_timeout_seconds)
+
+    if active_job:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"AI job {active_job.id} is still {active_job.status}.",
+        )
+
+    job = jobs.create(payload.model_dump())
+    background_tasks.add_task(run_ai_job, job.id, session_factory)
+
+    return job
+
+
+@router.get(
+    "/process/{job_id}",
+    response_model=AIJobRead,
+)
+def get_job(job_id: str, db: DbSession) -> AIJobRead:
+    job = AIJobRepository(db).get(job_id)
+
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="AI job not found.",
+        )
+
+    return job
+
+
+@router.get(
+    "/topics",
+    response_model=list[TopicRead],
+)
+def list_topics(db: DbSession) -> list[TopicRead]:
+    """Every topic found so far, with its size, keywords and most typical articles."""
+
+    topics = TopicRepository(db).list_with_sizes()
+
+    article_ids = {
+        article_id
+        for topic, _ in topics
+        for article_id in topic.representative_article_ids
+    }
+    articles = {
+        article.id: article
+        for article in ArticleRepository(db).get_many(article_ids)
+    }
+
+    return [
+        TopicRead(
+            id=topic.id,
+            label=topic.label,
+            size=size,
+            keywords=topic.keywords,
+            representative_articles=[
+                RepresentativeArticle(
+                    id=article.id,
+                    title=article.title,
+                    url=article.url,
+                )
+                for article_id in topic.representative_article_ids
+                if (article := articles.get(article_id))
+            ],
+            updated_at=topic.updated_at,
+        )
+        for topic, size in topics
+    ]

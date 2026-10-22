@@ -71,7 +71,8 @@ def add_source(db: Session, name: str, feed_url: str) -> int:
 
 def stub(db: Session, name: str, feed_url: str, **kwargs: object) -> StubSource:
     source_id = add_source(db, name, feed_url)
-    values = {"id": source_id, "name": name, "feed_url": feed_url, "is_active": True}
+    values = {"id": source_id, "name": name, "feed_url": feed_url, "is_active": True,
+              "type": "rss", "query": None, "language": "en"}
     return StubSource(**kwargs, **values)
 
 

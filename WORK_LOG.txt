@@ -1,0 +1,130 @@
+AI NEWS INTELLIGENCE BACKEND (AINIS) - WORK LOG
+================================================
+Written: 2026-10-22
+Built from git history (3 commits) and the uncommitted changes in the working tree.
+
+
+------------------------------------------------------------------
+PART 1 - COMMITTED WORK
+------------------------------------------------------------------
+
+[cd1277d] 2026-09-26  Initial commit: AINIS
+  - FastAPI app skeleton: app/main.py, config, DB session, base models.
+  - Models: Source, Article.
+  - Routes: health, sources, articles, ingestion, topics, ai.
+  - Dockerfile, .env.example, README.
+
+[4d9a931] 2026-09-29  Pytest, RSS flow, ingestion fixes
+  - Alembic set up (alembic.ini, env.py, 0001_initial migration).
+  - RSS/Atom feed parsing hardened (app/services/feed.py), feed size limits.
+  - New text cleaning service (app/services/text_cleaning.py).
+  - UTC datetime column type (app/db/types.py).
+  - Fixed ingestion.py: source attributes were initialized outside the session.
+  - Docker Compose (compose.yaml), scripts/database.sh, docs/database.md.
+  - Tests: ingestion, feed limits, text cleaning, DB migrations,
+    500 on DB error, AI availability.
+
+[1907a2a] 2026-10-13  Improve docker and AI pipeline
+  - PostgreSQL test support (tests/pg_support.py) + source regression tests.
+  - AI corpus fixture (tests/fixtures/ai_corpus.py), e2e seed script.
+  - AI pipeline tests (tests/test_ai_pipeline.py).
+  - Docker / compose tweaks, docs updates.
+
+
+------------------------------------------------------------------
+PART 2 - UNCOMMITTED WORK (current working tree)
+------------------------------------------------------------------
+26 files modified (+1270 / -211 lines), ~25 new files.
+
+1. DATABASE MIGRATIONS (new)
+   - 0002_topics: "topics" table (label, centroid, article_count).
+   - 0003_ai_jobs_and_embeddings: articles.embedding + embedding_key
+     (embedding cache), topics.keywords + representative_article_ids,
+     new "ai_jobs" table.
+   - 0004_article_ai_summary: articles.ai_summary (LLM summaries cached).
+   - 0005_source_types: sources.type ("rss" | "news_api"), sources.query,
+     feed_url made nullable (batch mode so SQLite works).
+
+2. AI PIPELINE AS BACKGROUND JOBS
+   - New model/repo: AIJob (pending -> running -> succeeded | failed).
+   - app/services/ai_jobs.py: runs the pipeline via FastAPI BackgroundTasks
+     with its own DB session; never raises, errors stored on the job.
+   - app/services/ai_errors.py: shared error types/messages, no ML imports
+     so the app starts even if ML libraries fail to load.
+   - Routes (app/api/routes/ai.py):
+       POST /api/v1/ai/process          -> 202 + job id
+                                           409 not enough docs / job running
+                                           503 ML libs missing
+       GET  /api/v1/ai/process/{job_id} -> job status / result / error
+       GET  /api/v1/ai/topics           -> topics with size, keywords,
+                                           representative articles
+   - A stuck job stops blocking new ones after AI_JOB_TIMEOUT_SECONDS.
+
+3. TOPIC MODEL IMPROVEMENTS (app/services/topic_model.py, big rewrite)
+   - Embedding model changed to intfloat/multilingual-e5-base.
+   - Embeddings cached in DB (app/services/embeddings.py), keyed by
+     model + content hash: re-runs only encode new/changed articles.
+   - Outlier reduction: outliers join the closest topic if similarity
+     >= AI_OUTLIER_MIN_SIMILARITY.
+   - Close topics merged; optional zero-shot editorial categories
+     (AI_ZEROSHOT_TOPICS).
+   - Real confidences from HDBSCAN soft clustering ("hdbscan_soft"),
+     fixed 0.5 "fallback" otherwise.
+   - Topic coherence score (NPMI, app/services/topic_coherence.py)
+     reported per batch to compare tuning changes.
+   - Stable topic labels across batches (app/services/topic_registry.py):
+     new topic centroid is matched to stored centroids
+     (AI_TOPIC_MATCH_THRESHOLD); a match reuses the old label.
+
+4. TRENDING TOPICS (app/services/trending.py)
+   - GET /api/v1/topics/trending now compares the recent window
+     (window_hours, default 24) to a baseline (baseline_days, default 7).
+   - trend_score = (recent - expected) / sqrt(expected + 1)
+     (Poisson-style z-score). Catch-all topics ("Other") never trend.
+   - New params: window_hours, baseline_days, min_articles, limit.
+
+5. NEWS SEARCH / Q&A (new feature)
+   - POST /api/v1/ai/ask  {"input": "<query or article link>"}
+   - app/services/news_search.py: semantic search over stored articles,
+     small recency boost, min similarity ASK_MIN_SIMILARITY, cited answer.
+     A pasted link is downloaded and saved under the inactive
+     "User-submitted links" source.
+   - app/services/llm.py: client for any OpenAI-compatible chat API
+     (default: local Gemma via Ollama; OpenAI also works).
+   - app/services/prompts.py: summary + answer prompts; article text is
+     wrapped in tags and treated as untrusted data (prompt injection guard).
+   - LLM down -> extractive summaries, answer = null (still works).
+   - app/static/index.html: search page served at "/" (API docs at /docs).
+
+6. SOURCE TYPES + INGESTION
+   - Sources can be "rss" (feed_url) or "news_api" (query, via GNews,
+     app/services/news_api.py; needs NEWS_API_KEY).
+   - Full-text fetch: when a source only gives a snippet shorter than
+     FULL_TEXT_MIN_CHARS (800), ingestion downloads the article page
+     (INGESTION_FULL_TEXT=true/false). ArticleContentExtractor is now used.
+
+7. CONFIG (.env.example / app/core/config.py) - new settings
+   AI_OUTLIER_MIN_SIMILARITY, AI_TOPIC_MATCH_THRESHOLD, AI_ZEROSHOT_TOPICS,
+   AI_ZEROSHOT_MIN_SIMILARITY, AI_JOB_TIMEOUT_SECONDS,
+   LLM_BASE_URL, LLM_MODEL, LLM_API_KEY, LLM_TIMEOUT_SECONDS,
+   ASK_MAX_SOURCES, ASK_MIN_SIMILARITY, ASK_MAX_CANDIDATES,
+   INGESTION_FULL_TEXT, FULL_TEXT_MIN_CHARS,
+   NEWS_API_KEY, NEWS_API_BASE_URL, NEWS_API_MAX_ARTICLES
+
+8. TESTS (new)
+   - test_news_search.py, test_source_types.py, test_topic_coherence.py,
+     test_topic_registry.py, test_trending.py
+   - test_ai_pipeline.py extended; conftest / pg_support updated.
+
+9. DOCS
+   - README.md: source types, AI API, trending, news search / Q&A sections.
+
+
+------------------------------------------------------------------
+TO CHECK / NEXT STEPS
+------------------------------------------------------------------
+[ ] Run tests: pytest
+[ ] Run migrations: alembic upgrade head   (0002 -> 0005)
+[ ] Check Ollama is running and LLM_MODEL matches `ollama list`
+[ ] Set NEWS_API_KEY if using news_api sources
+[ ] Commit Part 2 (nothing in Part 2 is committed yet)

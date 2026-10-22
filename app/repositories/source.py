@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from app.models.source import Source
 from app.schemas.source import SourceCreate
 
+# Placeholder feed URL of the source for user-submitted links (never fetched).
+USER_LINKS_FEED_URL = "user-submitted://links"
+
 
 class SourceRepository:
     def __init__(self, db: Session):
@@ -12,7 +15,9 @@ class SourceRepository:
     def create(self, payload: SourceCreate) -> Source:
         source = Source(
             name=payload.name.strip(),
-            feed_url=str(payload.feed_url),
+            type=payload.type,
+            feed_url=str(payload.feed_url) if payload.feed_url else None,
+            query=payload.query.strip() if payload.query else None,
             language=payload.language.lower(),
         )
         self.db.add(source)
@@ -25,6 +30,22 @@ class SourceRepository:
         if active_only:
             statement = statement.where(Source.is_active.is_(True))
         return list(self.db.scalars(statement))
+
+    def get_or_create_user_links(self) -> Source:
+        """The source that holds articles users submitted by link.
+
+        It is inactive, so RSS ingestion never tries to fetch its placeholder URL.
+        """
+        source = self.db.scalar(select(Source).where(Source.feed_url == USER_LINKS_FEED_URL))
+        if source is None:
+            source = Source(
+                name="User-submitted links",
+                feed_url=USER_LINKS_FEED_URL,
+                is_active=False,
+            )
+            self.db.add(source)
+            self.db.commit()
+        return source
 
     def get(self, source_id: int) -> Source | None:
         return self.db.get(Source, source_id)

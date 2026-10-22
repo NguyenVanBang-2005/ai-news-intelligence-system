@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News Search</title>
+  <style>
+    :root {
+      --bg: #f7f7f5;
+      --card: #ffffff;
+      --text: #1f2328;
+      --muted: #656d76;
+      --border: #d8dee4;
+      --accent: #0969da;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --card: #161b22;
+        --text: #e6edf3;
+        --muted: #8d96a0;
+        --border: #30363d;
+        --accent: #4493f8;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
+    h1 { font-size: 1.5rem; margin: 0 0 16px; }
+    form { display: flex; gap: 8px; }
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    button {
+      padding: 10px 18px;
+      font: inherit;
+      color: #fff;
+      background: var(--accent);
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .hint, .meta, .status { color: var(--muted); font-size: 0.875rem; }
+    .answer, .source {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .source h2 { font-size: 1rem; margin: 0 0 4px; }
+    .source a { color: var(--accent); text-decoration: none; }
+    .source a:hover { text-decoration: underline; }
+    .source p, .answer p { margin: 8px 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>News Search</h1>
+    <form id="search-form">
+      <input id="search-input" name="input" required minlength="2" maxlength="1500"
+             placeholder="Search the news, or paste an article link"
+             autocomplete="off">
+      <button id="search-button" type="submit">Search</button>
+    </form>
+    <p class="hint">Results come from articles already collected from your RSS sources.</p>
+    <div id="results"></div>
+  </main>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const input = document.getElementById("search-input");
+    const button = document.getElementById("search-button");
+    const results = document.getElementById("results");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      showStatus("Searching… summaries can take a while the first time.");
+
+      try {
+        const response = await fetch("/api/v1/ai/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: input.value }),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          showStatus(errorMessage(data));
+          return;
+        }
+        showResults(data);
+      } catch {
+        showStatus("The server could not be reached.");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function errorMessage(data) {
+      // FastAPI sends a string, or a list of validation errors.
+      if (typeof data.detail === "string") return data.detail;
+      return "Please enter at least 2 characters.";
+    }
+
+    function showStatus(message) {
+      results.replaceChildren(element("p", "status", message));
+    }
+
+    function showResults(data) {
+      if (data.sources.length === 0) {
+        showStatus("No relevant articles found. Try other words, or ingest more sources.");
+        return;
+      }
+
+      const children = [];
+
+      if (data.answer) {
+        const answer = element("div", "answer");
+        answer.append(element("strong", "", "Overview"), element("p", "", data.answer));
+        children.push(answer);
+      }
+
+      data.sources.forEach((source, index) => children.push(sourceCard(source, index + 1)));
+      results.replaceChildren(...children);
+    }
+
+    function sourceCard(source, number) {
+      const card = element("article", "source");
+      const title = element("h2");
+      const link = element("a", "", `[${number}] ${source.title}`);
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      title.append(link);
+
+      const date = source.published_at
+        ? new Date(source.published_at).toLocaleDateString()
+        : "date unknown";
+      const method = source.summary_method === "ai" ? "AI summary" : "Excerpt (AI unavailable)";
+      const meta = element("div", "meta", `${source.source_name} · ${date} · ${method}`);
+
+      card.append(title, meta, element("p", "", source.summary));
+      return card;
+    }
+
+    // Text is always set with textContent, so article content can never inject HTML.
+    function element(tag, className = "", text = "") {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text) node.textContent = text;
+      return node;
+    }
+  </script>
+</body>
+</html>

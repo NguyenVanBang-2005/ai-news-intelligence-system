@@ -30,6 +30,11 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+def get_session_factory() -> sessionmaker[Session]:
+    """For work that outlives the request (background jobs) and needs its own sessions."""
+    return SessionLocal
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
