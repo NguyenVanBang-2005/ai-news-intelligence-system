@@ -1,0 +1,57 @@
+Test results evidence
+=====================
+
+Date:        2026-10-24 (local time, Windows 11)
+Commit:      bdd62b618089089e64923702974f5c0bdac87b54 (bdd62b6, working tree clean)
+Python:      3.14.7 (.venv\Scripts\python.exe)
+pytest:      8.4.2
+PostgreSQL:  17.11 (docker image postgres:17-alpine, temporary container)
+Docker:      29.8.0
+
+Note: pyproject.toml already sets addopts = "-q", so `pytest -q` becomes -qq and
+hides the final "N passed" line. Counts below come from the exact command, and the
+summary line was confirmed with a second run using `-o addopts=""`.
+
+
+Run 1 - SQLite only (TEST_POSTGRES_ADMIN_URL not set)
+-----------------------------------------------------
+Commands:
+  unset TEST_POSTGRES_ADMIN_URL
+  python -m pytest -q -rs                  # exit code 0
+  python -m pytest -q -rs -o addopts=""    # to print the summary line
+
+Result:  259 passed, 129 skipped, 0 failed, 12 warnings in 69.24s
+
+Skip reasons:
+  128  TEST_POSTGRES_ADMIN_URL is not set (no PostgreSQL test server)
+       (test_admin_auth, test_ai_search, test_client_ip, test_news_search,
+        test_source_types, test_sources_regression, test_topic_registry, test_trending)
+    1  tests\test_ai_pipeline.py:27 - AI dependencies unavailable: DLL load failed
+       while importing _hdbscan_reachability: An Application Control policy has
+       blocked this file. (whole module skipped)
+
+Flakiness observed: the very first invocation stopped with "Interrupted: 2 errors
+during collection" - KeyError: '__reduce_cython__' inside sklearn (imported via
+sentence_transformers), alongside a Windows Application Control block on
+torch_global_deps.dll. The two runs right after passed with identical counts.
+This is an environment issue (Windows Smart App Control / DLL blocking), not a
+code failure.
+
+
+Run 2 - SQLite + PostgreSQL (temporary container)
+-------------------------------------------------
+Commands:
+  docker run --rm -d --name ainis_test_pg -e POSTGRES_PASSWORD=<redacted> -p 127.0.0.1::5432 postgres:17-alpine
+  docker port ainis_test_pg 5432           # -> 127.0.0.1:53134
+  export TEST_POSTGRES_ADMIN_URL=postgresql+psycopg://postgres:<redacted>@127.0.0.1:53134/postgres
+                                           # shell session only, not written to .env
+  python -m pytest -q -rs                  # exit code 0
+  python -m pytest -q -rs -o addopts=""    # to print the summary line
+  docker rm -f ainis_test_pg
+
+Result:  387 passed, 1 skipped, 0 failed, 22 warnings in 466.83s (0:07:46)
+         (the 128 PostgreSQL tests skipped in Run 1 all ran and passed)
+
+Skip reasons:
+    1  tests\test_ai_pipeline.py:27 - AI dependencies unavailable (same Application
+       Control DLL block as Run 1)
