@@ -1,9 +1,8 @@
 from functools import lru_cache
-from ipaddress import IPv4Network, IPv6Network, ip_network
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
 
@@ -61,13 +60,6 @@ class Settings(BaseSettings):
     ai_search_rate_per_minute: int = Field(default=30, ge=1)
     ai_search_max_body_bytes: int = Field(default=4096, ge=1)
 
-    # Reverse proxies whose X-Forwarded-For is believed, as comma-separated CIDRs
-    # ("172.28.0.0/16,10.0.0.1/32"). Empty: no proxy is trusted and the socket peer is the
-    # client. NoDecode: the env value is a plain string, not JSON.
-    trusted_proxy_cidrs: Annotated[list[IPv4Network | IPv6Network], NoDecode] = Field(
-        default_factory=list
-    )
-
     # Ingestion downloads the article page when a source only gives a snippet
     # shorter than full_text_min_chars characters.
     ingestion_full_text: bool = True
@@ -88,19 +80,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
-
-    @field_validator("trusted_proxy_cidrs", mode="before")
-    @classmethod
-    def parse_trusted_proxy_cidrs(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        networks = []
-        for part in filter(None, (item.strip() for item in value.split(","))):
-            try:
-                networks.append(ip_network(part))
-            except ValueError as exc:
-                raise ValueError(f"TRUSTED_PROXY_CIDRS: invalid network {part!r}: {exc}") from exc
-        return networks
 
     @model_validator(mode="after")
     def build_database_url_from_parts(self) -> "Settings":
