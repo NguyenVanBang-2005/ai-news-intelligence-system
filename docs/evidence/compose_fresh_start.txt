@@ -1,0 +1,56 @@
+Compose fresh start evidence (step S2 - single entry point)
+===========================================================
+
+Date:     2026-10-24 (local time, Windows 11)
+Commit:   7d4b3cd (base; compose.yaml / compose.override.yaml changes are uncommitted)
+Docker:   29.8.0
+Project:  ainis_fresh (isolated; ainis_main / ainis_e2e / ainis_dockertest not touched)
+
+Changes under test
+------------------
+compose.yaml           db: no `ports` (DB only reachable inside the Docker network)
+                       api: "127.0.0.1:${API_PORT:-8001}:8000"
+                       No proxy configuration existed, nothing to remove.
+compose.override.yaml  db: "127.0.0.1:${POSTGRES_PORT:-5432}:5432" (local dev only), api not published.
+
+Commands
+--------
+export API_PORT=8002 POSTGRES_PORT=55433
+
+docker compose -p ainis_fresh -f compose.yaml config        # api published 127.0.0.1:8002, db has no ports
+docker compose -p ainis_fresh config                         # with override: db also on 127.0.0.1:55433
+docker compose -p ainis_fresh -f compose.yaml up -d --build  # exit 0 (image build ~20 min, image 10.2GB)
+
+Container state after up:
+  ainis_fresh-api-1      Up                 127.0.0.1:8002->8000/tcp
+  ainis_fresh-migrate-1  Exited (0)
+  ainis_fresh-db-1       Up (healthy)       5432/tcp   (not published)
+
+HTTP checks on 127.0.0.1:8002:
+  GET /docs             200
+  GET /                 200   (News Search HTML page)
+  GET /api/v1/health    200   {"status":"ok"}
+  GET /health           404   {"detail":"Not Found"}
+      -> the app only defines the health route under the /api/v1 prefix
+         (app/api/routes/health.py, mounted by app/api/router.py). No code changed.
+
+DB port check:
+  docker compose -p ainis_fresh -f compose.yaml port db 5432   -> no mapping (prints "invalid IP:0")
+  docker inspect ainis_fresh-db-1 --format '{{json .HostConfig.PortBindings}}'   -> {}
+
+Teardown:
+  docker compose -p ainis_fresh -f compose.yaml down -v
+  -> removed ainis_fresh containers, network ainis_fresh_default, volume ainis_fresh_postgres_data
+
+After teardown:
+  No ainis_fresh containers or volumes left.
+  ainis_main, ainis_e2e, ainis_dockertest containers unchanged (same status as before).
+  Volumes ainis_main_postgres_data, ainis_e2e_postgres_data, ainis_e2e_hf_cache,
+  ainis_dockertest_postgres_data still present.
+
+Result
+------
+PASS  db not published when using compose.yaml alone
+PASS  /docs and / return 200 on 127.0.0.1:8002
+FAIL  /health returns 404 (health lives at /api/v1/health, which returns 200)
+PASS  only the ainis_fresh stack was removed

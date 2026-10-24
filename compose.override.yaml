@@ -1,0 +1,7 @@
+# Local development only: `docker compose up` merges this file automatically.
+# It exposes the DB on localhost so host-side Python (tests, alembic) can reach it.
+# Use `-f compose.yaml` to run without it (DB stays private to the Docker network).
+services:
+  db:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
