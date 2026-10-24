@@ -156,11 +156,15 @@ class ArticleRepository:
 
         return list(self.db.scalars(statement))
 
-    def list_for_search(self, *, limit: int) -> list[Article]:
-        """The newest articles that have content to search in."""
+    def list_for_search(self, *, limit: int, only_embedded: bool = False) -> list[Article]:
+        """The newest articles that have content to search in (and, if asked, a stored
+        embedding)."""
+        filters = [Article.content != ""]
+        if only_embedded:
+            filters.append(Article.embedding.is_not(None))
         statement = (
             select(Article)
-            .where(Article.content != "")
+            .where(*filters)
             .order_by(Article.created_at.desc(), Article.id.desc())
             .limit(limit)
         )

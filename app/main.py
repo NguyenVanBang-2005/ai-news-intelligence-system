@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from app.api.router import api_router
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 
 app = FastAPI(
@@ -12,6 +13,12 @@ app = FastAPI(
     description="Backend MVP for collecting and analyzing AI news.",
 )
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+# Public endpoints only; admin endpoints are already behind the token.
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    paths={f"{settings.api_v1_prefix}/ai/search"},
+    max_bytes=lambda: settings.ai_search_max_body_bytes,
+)
 
 
 SEARCH_PAGE = Path(__file__).parent / "static" / "index.html"

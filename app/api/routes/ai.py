@@ -1,6 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from app.api.deps import DbSession, SessionFactory
+from app.api.deps import DbSession, SessionFactory, require_admin
 from app.core.config import settings
 from app.repositories.ai_job import AIJobRepository
 from app.repositories.article import ArticleRepository
@@ -28,6 +28,7 @@ router = APIRouter(
     "/process",
     response_model=AIJobRead,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin)],
 )
 def process_articles(
     payload: AIProcessRequest,

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, require_admin
 from app.schemas.ingestion import IngestionResult
 from app.services.ingestion import IngestionService
 
@@ -10,6 +10,7 @@ router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 @router.post(
     "/run",
     response_model=IngestionResult,
+    dependencies=[Depends(require_admin)],
     description=(
         "Collect new articles from saved sources: RSS/Atom sources read their feed_url, "
         "news_api sources search their query. Short snippets are replaced by the full "

@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.session import Base, get_db
 from app.main import app
+from tests.pg_support import ADMIN_HEADERS
 
 
 def test_create_list_and_reject_duplicate_source() -> None:
@@ -29,7 +30,7 @@ def test_create_list_and_reject_duplicate_source() -> None:
         "language": "en",
     }
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers=ADMIN_HEADERS) as client:
             created = client.post("/api/v1/sources", json=payload)
             listed = client.get("/api/v1/sources")
             duplicate = client.post("/api/v1/sources", json=payload)

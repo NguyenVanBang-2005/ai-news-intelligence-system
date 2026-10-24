@@ -54,7 +54,8 @@
     }
     button:disabled { opacity: 0.6; cursor: wait; }
     .hint, .meta, .status { color: var(--muted); font-size: 0.875rem; }
-    .answer, .source {
+    .status.error { color: #cf222e; }
+    .source {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -64,19 +65,19 @@
     .source h2 { font-size: 1rem; margin: 0 0 4px; }
     .source a { color: var(--accent); text-decoration: none; }
     .source a:hover { text-decoration: underline; }
-    .source p, .answer p { margin: 8px 0 0; }
+    .source p { margin: 8px 0 0; }
   </style>
 </head>
 <body>
   <main>
     <h1>News Search</h1>
     <form id="search-form">
-      <input id="search-input" name="input" required minlength="2" maxlength="1500"
-             placeholder="Search the news, or paste an article link"
+      <input id="search-input" name="input" required minlength="2" maxlength="500"
+             placeholder="Search the news by keywords"
              autocomplete="off">
       <button id="search-button" type="submit">Search</button>
     </form>
-    <p class="hint">Results come from articles already collected from your RSS sources.</p>
+    <p class="hint">Results come from articles already collected. Links are not accepted here.</p>
     <div id="results"></div>
   </main>
 
@@ -89,54 +90,49 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       button.disabled = true;
-      showStatus("Searching… summaries can take a while the first time.");
+      showStatus("Searching…");
 
       try {
-        const response = await fetch("/api/v1/ai/ask", {
+        const response = await fetch("/api/v1/ai/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ input: input.value }),
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          showStatus(errorMessage(data));
+          showStatus(errorMessage(response.status, data), true);
           return;
         }
         showResults(data);
       } catch {
-        showStatus("The server could not be reached.");
+        showStatus("The server could not be reached.", true);
       } finally {
         button.disabled = false;
       }
     });
 
-    function errorMessage(data) {
-      // FastAPI sends a string, or a list of validation errors.
+    function errorMessage(status, data) {
+      // FastAPI sends a string (e.g. for a pasted link), or a list of validation errors.
       if (typeof data.detail === "string") return data.detail;
-      return "Please enter at least 2 characters.";
+      if (status === 422) return "Please enter 2 to 500 characters.";
+      if (status === 429) return "Too many searches. Please wait a moment and try again.";
+      return `Search failed (HTTP ${status}). Please try again later.`;
     }
 
-    function showStatus(message) {
-      results.replaceChildren(element("p", "status", message));
+    function showStatus(message, isError = false) {
+      results.replaceChildren(element("p", isError ? "status error" : "status", message));
     }
 
     function showResults(data) {
       if (data.sources.length === 0) {
-        showStatus("No relevant articles found. Try other words, or ingest more sources.");
+        showStatus("No relevant articles found. Try other words.");
         return;
       }
 
-      const children = [];
-
-      if (data.answer) {
-        const answer = element("div", "answer");
-        answer.append(element("strong", "", "Overview"), element("p", "", data.answer));
-        children.push(answer);
-      }
-
-      data.sources.forEach((source, index) => children.push(sourceCard(source, index + 1)));
-      results.replaceChildren(...children);
+      results.replaceChildren(
+        ...data.sources.map((source, index) => sourceCard(source, index + 1))
+      );
     }
 
     function sourceCard(source, number) {
@@ -151,7 +147,7 @@
       const date = source.published_at
         ? new Date(source.published_at).toLocaleDateString()
         : "date unknown";
-      const method = source.summary_method === "ai" ? "AI summary" : "Excerpt (AI unavailable)";
+      const method = source.summary_method === "extractive" ? "Excerpt" : "AI summary";
       const meta = element("div", "meta", `${source.source_name} · ${date} · ${method}`);
 
       card.append(title, meta, element("p", "", source.summary));

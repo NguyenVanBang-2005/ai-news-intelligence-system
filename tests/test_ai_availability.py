@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.db.session import get_db
 from app.main import app
 from tests.db_isolation import isolated_env
+from tests.pg_support import ADMIN_HEADERS
 
 STARTUP_SCRIPT = """
 import importlib.abc
@@ -78,7 +79,7 @@ def test_ai_dependency_failure_returns_503(monkeypatch, error_type) -> None:
 
     monkeypatch.setattr(builtins, "__import__", blocked_import)
     app.dependency_overrides[get_db] = lambda: None
-    client = TestClient(app)
+    client = TestClient(app, headers=ADMIN_HEADERS)
     try:
         # No lifespan: this request must fail before any DB or model access.
         response = client.post("/api/v1/ai/process", json={})

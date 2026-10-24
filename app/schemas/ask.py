@@ -18,8 +18,19 @@ class AskSource(BaseModel):
     # Cosine similarity to the request, 0-1.
     similarity: float
     summary: str
-    # "ai": written by the LLM. "extractive": first sentences, used when the LLM is unavailable.
-    summary_method: Literal["ai", "extractive"]
+    # "ai": written by the LLM. "cached": an LLM summary stored earlier, reused by the
+    # public search without calling the LLM. "extractive": first sentences of the article.
+    summary_method: Literal["ai", "cached", "extractive"]
+
+
+class AiSearchRequest(BaseModel):
+    # Search words only; links are refused (reading a link needs /ai/ask).
+    input: str = Field(min_length=2, max_length=500)
+
+
+class AiSearchResponse(BaseModel):
+    # Stored articles only, with extractive summaries; no LLM answer.
+    sources: list[AskSource]
 
 
 class AskResponse(BaseModel):

@@ -108,3 +108,20 @@ class ArticleEmbedder:
             )
 
         return np.vstack(embeddings)
+
+    def cached(self, articles: list[Article]) -> tuple[list[Article], np.ndarray]:
+        """The articles whose stored embedding matches their current text and model, with
+        those embeddings. Never encodes: anything else is left out."""
+
+        found = [
+            (article, embedding)
+            for article in articles
+            if (embedding := article.cached_embedding(
+                embedding_key(build_document(title=article.title, content=article.content))
+            )) is not None
+        ]
+
+        if not found:
+            return [], np.empty((0, 0), dtype=np.float32)
+
+        return [article for article, _ in found], np.vstack([e for _, e in found])

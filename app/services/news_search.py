@@ -2,6 +2,7 @@
 
 import logging
 import math
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -29,7 +30,12 @@ from app.services.text_cleaning import truncate
 logger = logging.getLogger(__name__)
 
 SUMMARY_AI = "ai"
+SUMMARY_CACHED = "cached"
 SUMMARY_EXTRACTIVE = "extractive"
+
+LINK_NOT_ALLOWED_MESSAGE = (
+    "Reading a link requires admin access. Please enter search keywords instead."
+)
 
 # News goes stale: a fresh article gets up to this much added to its ranking
 # score, fading over about a week. Similarity still decides what is relevant.
@@ -39,6 +45,10 @@ RECENCY_DECAY_DAYS = 7
 
 class LinkUnreadableError(ValueError):
     pass
+
+
+class LinkNotAllowedError(ValueError):
+    """Public search only looks in stored articles; reading a link needs /ai/ask."""
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,58 @@ def is_link(text: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc) and " " not in text
 
 
+# Host name: dot-separated labels ending in an alphabetic TLD, then an optional port,
+# path, query or fragment.
+_DOMAIN = re.compile(
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?P<tld>[a-z]{2,63})"
+    r"(?P<rest>(?::\d{1,5})?(?:[/?#]\S*)?)",
+    re.IGNORECASE,
+)
+
+# TLDs that make a bare "name.tld" a link. Purely syntactic matching would also catch search
+# words like "node.js" or "vue.js", so a bare name needs one of these; a path, port, query or
+# a "www." prefix is enough on its own. File-extension-like ccTLDs (.js .py .md .rs .sh .ts)
+# are deliberately absent.
+COMMON_TLDS = frozenset({
+    "com", "net", "org", "edu", "gov", "int", "mil", "info", "biz", "io", "ai", "co", "app",
+    "dev", "news", "tech", "online", "site", "blog", "xyz", "me", "tv",
+    "us", "uk", "eu", "de", "fr", "es", "it", "nl", "se", "no", "ch", "pl", "ru", "cn",
+    "jp", "kr", "in", "au", "ca", "br", "vn",
+})
+
+
+def looks_like_link(text: str) -> bool:
+    """Whether a public search input is a link (refused there) rather than search words.
+
+    Stricter than is_link, which /ai/ask keeps using for its link flow. Links:
+    anything starting with http:// or https://, and, without whitespace, a host name that has
+    a path/port/query, starts with "www." or ends in a common TLD ("example.com/a",
+    "www.example.com", "example.com"). Search words: anything with whitespace ("AI
+    regulation"), no dot ("gpt-5"), a non-alphabetic or one-letter last part ("v1.2",
+    "e.g."), or a bare name with an uncommon TLD ("node.js").
+    A missed link is harmless: search never downloads, it only searches the words.
+    """
+
+    text = text.strip()
+
+    if text.lower().startswith(("http://", "https://")):
+        return True
+
+    if any(character.isspace() for character in text):
+        return False
+
+    match = _DOMAIN.fullmatch(text)
+
+    if match is None:
+        return False
+
+    return (
+        bool(match["rest"])
+        or text.lower().startswith("www.")
+        or match["tld"].lower() in COMMON_TLDS
+    )
+
+
 class NewsSearchService:
     def __init__(
         self,
@@ -70,28 +132,66 @@ class NewsSearchService:
     ):
         self.articles = ArticleRepository(db)
         self.sources = SourceRepository(db)
-        self.llm = llm or LLMClient.from_settings()
-        self.extractor = extractor or ArticleContentExtractor(
-            timeout_seconds=settings.request_timeout_seconds,
-            max_download_bytes=settings.article_max_download_bytes,
-            max_redirects=settings.article_max_redirects,
-        )
+        # Created on first use, so search() never builds a client that reaches outside.
+        self._llm = llm
+        self._extractor = extractor
         self.analyzer = HeuristicAnalyzer()
         # Set to False after the first failed LLM call, so one request never
         # waits for the same timeout once per source.
         self.llm_available = True
 
+    @property
+    def llm(self) -> LLMClient:
+        if self._llm is None:
+            self._llm = LLMClient.from_settings()
+        return self._llm
+
+    @property
+    def extractor(self) -> ArticleContentExtractor:
+        if self._extractor is None:
+            self._extractor = ArticleContentExtractor(
+                timeout_seconds=settings.request_timeout_seconds,
+                max_download_bytes=settings.article_max_download_bytes,
+                max_redirects=settings.article_max_redirects,
+            )
+        return self._extractor
+
+    def search(self, text: str) -> list[FoundSource]:
+        """Stored articles matching a search request, with extractive summaries.
+
+        Offline by design: no link download, no LLM call, nothing leaves the server.
+        """
+
+        text = text.strip()
+
+        if looks_like_link(text):
+            raise LinkNotAllowedError(LINK_NOT_ALLOWED_MESSAGE)
+
+        model, embedder = self._embedding()
+        # Only the query is encoded; articles without a stored embedding are skipped
+        # (POST /ai/process computes them).
+        matches = self._related_articles(
+            encode_queries(model, [text])[0],
+            embedder,
+            exclude_ids=set(),
+            count=settings.ask_max_sources,
+            cached_only=True,
+        )
+
+        return [
+            FoundSource(article, similarity, article.ai_summary, SUMMARY_CACHED)
+            if article.ai_summary
+            else FoundSource(
+                article, similarity, self._extractive_summary(article), SUMMARY_EXTRACTIVE
+            )
+            for article, similarity in matches
+        ]
+
     def ask(self, request: str) -> SearchAnswer:
         """Answer a search request, or explain a link, using the stored articles."""
 
         request = request.strip()
-
-        try:
-            model = get_embedding_model()
-        except OSError as exc:
-            raise EmbeddingModelUnavailableError from exc
-
-        embedder = ArticleEmbedder(self.articles, model)
+        model, embedder = self._embedding()
 
         if is_link(request):
             linked_article = self._article_for_link(request)
@@ -122,6 +222,14 @@ class NewsSearchService:
             answer=self._answer(question, sources),
             sources=sources,
         )
+
+    def _embedding(self) -> tuple[object, ArticleEmbedder]:
+        try:
+            model = get_embedding_model()
+        except OSError as exc:
+            raise EmbeddingModelUnavailableError from exc
+
+        return model, ArticleEmbedder(self.articles, model)
 
     def _article_for_link(self, url: str) -> Article:
         """The stored article for this URL, downloading and saving it when needed."""
@@ -165,19 +273,30 @@ class NewsSearchService:
         *,
         exclude_ids: set[int],
         count: int,
+        cached_only: bool = False,
     ) -> list[tuple[Article, float]]:
-        """The best matching articles with their similarity, one per story."""
+        """The best matching articles with their similarity, one per story.
+
+        cached_only: compare only with stored embeddings, never encode articles.
+        """
 
         candidates = [
             article
-            for article in self.articles.list_for_search(limit=settings.ask_max_candidates)
+            for article in self.articles.list_for_search(
+                limit=settings.ask_max_candidates, only_embedded=cached_only
+            )
             if article.id not in exclude_ids
         ]
 
         if not candidates or count <= 0:
             return []
 
-        embeddings = embedder.embed(candidates)
+        if cached_only:
+            candidates, embeddings = embedder.cached(candidates)
+            if not candidates:
+                return []
+        else:
+            embeddings = embedder.embed(candidates)
         similarities = embeddings @ query_embedding
         scores = similarities + np.array(
             [self._recency_boost(article) for article in candidates]
@@ -227,11 +346,12 @@ class NewsSearchService:
             return FoundSource(article, similarity, summary, SUMMARY_AI)
 
         # The LLM is unavailable: fall back to the first sentences of the article.
-        extractive = (
-            article.summary
-            or self.analyzer.analyze(article.title, article.content).summary
+        return FoundSource(
+            article, similarity, self._extractive_summary(article), SUMMARY_EXTRACTIVE
         )
-        return FoundSource(article, similarity, extractive, SUMMARY_EXTRACTIVE)
+
+    def _extractive_summary(self, article: Article) -> str:
+        return article.summary or self.analyzer.analyze(article.title, article.content).summary
 
     def _answer(self, question: str, sources: list[FoundSource]) -> str | None:
         if not sources:

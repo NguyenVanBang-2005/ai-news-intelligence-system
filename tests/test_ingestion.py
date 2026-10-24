@@ -354,6 +354,7 @@ def test_endpoint_uses_saved_source_url_and_reports_html_error(db: Session, monk
 
     from app.db.session import get_db
     from app.main import app
+    from tests.pg_support import ADMIN_HEADERS
 
     saved_url = "https://news.mit.edu/topic/artificial-intelligence2"
     add_source(db, "Saved HTML", saved_url)
@@ -367,7 +368,7 @@ def test_endpoint_uses_saved_source_url_and_reports_html_error(db: Session, monk
     feed = FeedClient(5, transport=httpx.MockTransport(handler))
     monkeypatch.setattr("app.services.ingestion.FeedClient", lambda timeout: feed)
     app.dependency_overrides[get_db] = lambda: db
-    client = TestClient(app)  # no lifespan: never initialize the configured application DB
+    client = TestClient(app, headers=ADMIN_HEADERS)  # no lifespan: never initialize the configured application DB
     try:
         response = client.post(
             "/api/v1/ingestion/run",
@@ -490,6 +491,7 @@ def test_endpoint_failed_and_duplicate_sources_do_not_block_next(db: Session, mo
 
     from app.db.session import get_db
     from app.main import app
+    from tests.pg_support import ADMIN_HEADERS
 
     add_source(db, "A Broken", BROKEN_FEED_URL)
     add_source(db, "B Daily", AI_FEED_URL)
@@ -497,7 +499,7 @@ def test_endpoint_failed_and_duplicate_sources_do_not_block_next(db: Session, mo
     feed = FeedClient(5, transport=httpx.MockTransport(serve_fixtures))
     monkeypatch.setattr("app.services.ingestion.FeedClient", lambda timeout: feed)
     app.dependency_overrides[get_db] = lambda: db
-    client = TestClient(app)
+    client = TestClient(app, headers=ADMIN_HEADERS)
     try:
         response = client.post("/api/v1/ingestion/run")
     finally:

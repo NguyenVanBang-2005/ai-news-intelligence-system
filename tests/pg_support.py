@@ -25,6 +25,10 @@ from tests.db_isolation import isolated_env
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN_URL = os.environ.get("TEST_POSTGRES_ADMIN_URL")
 
+# Set as ADMIN_API_TOKEN for every test by conftest; clients send it by default.
+TEST_ADMIN_TOKEN = "test-admin-token"
+ADMIN_HEADERS = {"X-Admin-Token": TEST_ADMIN_TOKEN}
+
 requires_postgres = pytest.mark.skipif(
     not ADMIN_URL, reason="TEST_POSTGRES_ADMIN_URL is not set (no PostgreSQL test server)"
 )
@@ -37,7 +41,7 @@ def alembic_upgrade(url: str) -> None:
     )
 
 
-def client_for(eng: Engine, **kwargs: bool) -> Generator[TestClient]:
+def client_for(eng: Engine, **kwargs) -> Generator[TestClient]:
     factory = sessionmaker(bind=eng, autoflush=False, expire_on_commit=False)
 
     def override_db() -> Generator[Session, None, None]:
@@ -47,6 +51,7 @@ def client_for(eng: Engine, **kwargs: bool) -> Generator[TestClient]:
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_session_factory] = lambda: factory
     try:
+        kwargs.setdefault("headers", ADMIN_HEADERS)
         with TestClient(app, **kwargs) as client:
             yield client
     finally:

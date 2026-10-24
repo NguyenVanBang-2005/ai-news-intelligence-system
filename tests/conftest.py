@@ -9,7 +9,13 @@ from sqlalchemy.pool import StaticPool
 
 import app.db.base  # noqa: F401  (registers all models on Base.metadata)
 from app.db.session import Base
-from tests.pg_support import ADMIN_URL, alembic_upgrade, client_for, requires_postgres
+from tests.pg_support import (
+    ADMIN_URL,
+    TEST_ADMIN_TOKEN,
+    alembic_upgrade,
+    client_for,
+    requires_postgres,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +24,24 @@ def no_full_text_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "ingestion_full_text", False)
+
+
+@pytest.fixture(autouse=True)
+def admin_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admin endpoints need a configured token; test clients send TEST_ADMIN_TOKEN."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "admin_api_token", TEST_ADMIN_TOKEN)
+
+
+@pytest.fixture(autouse=True)
+def fresh_search_rate_limit() -> Generator[None, None, None]:
+    """The search rate limiter is process-wide; no test may inherit another's hits."""
+    from app.api.deps import search_rate_limiter
+
+    search_rate_limiter.reset()
+    yield
+    search_rate_limiter.reset()
 
 
 @pytest.fixture

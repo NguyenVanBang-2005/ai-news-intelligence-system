@@ -1,14 +1,19 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, require_admin
 from app.repositories.source import SourceRepository
 from app.schemas.source import SourceCreate, SourceRead
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
 
-@router.post("", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=SourceRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
 def create_source(payload: SourceCreate, db: DbSession) -> SourceRead:
     try:
         return SourceRepository(db).create(payload)
@@ -24,7 +29,11 @@ def list_sources(db: DbSession) -> list[SourceRead]:
     return SourceRepository(db).list()
 
 
-@router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
+)
 def delete_source(source_id: int, db: DbSession) -> Response:
     repository = SourceRepository(db)
     source = repository.get(source_id)
