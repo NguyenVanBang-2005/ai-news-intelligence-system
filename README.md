@@ -24,6 +24,12 @@ docker compose up -d --build
 Compose gồm PostgreSQL 17, Alembic migration và API. Dữ liệu nằm trong named volume;
 timestamp dùng UTC. Nếu đã có `.env` từ bản SQLite, cập nhật theo hướng dẫn trước.
 
+- API ở <http://127.0.0.1:8001> (`API_PORT`). Kiểm tra sống: `GET /api/v1/health`.
+- DB chỉ publish trong `compose.override.yaml` (`127.0.0.1:5432`, `POSTGRES_PORT`), file này
+  được Compose tự gộp. `docker compose -f compose.yaml up -d` thì DB không có cổng ra host.
+- Image có thư viện ML (`requirements.txt` gồm `sentence-transformers`, `bertopic`,
+  `hdbscan`, `umap-learn`); `POST /api/v1/ai/process` chỉ trả 503 khi chúng không nạp được.
+
 ## Chạy Python local (PostgreSQL chạy trong Compose)
 
 ```bash
@@ -45,13 +51,23 @@ Dữ liệu SQLite cũ không tự động được import sang PostgreSQL.
 | Cách chạy | Cổng | Swagger | Cấu hình DB |
 | --- | --- | --- | --- |
 | Docker Compose (`ainis_main`, `API_PORT=8001` trong `.env`) | 8001 | <http://127.0.0.1:8001/docs> | `POSTGRES_*`, migrate tự chạy |
-| `uvicorn app.main:app --reload` trên host | 8000 | <http://127.0.0.1:8000/docs> | `DATABASE_URL` trong `.env` |
+| `uvicorn app.main:app --reload` trên host | 8000 (cổng mặc định của uvicorn, không phải API Docker) | <http://127.0.0.1:8000/docs> | `DATABASE_URL` trong `.env` |
 
 Hai tiến trình độc lập; chọn một cổng và dùng đúng Swagger của nó. Tiến trình trên host
 không tự migrate: nếu `POST /api/v1/sources` trả `500 Internal Server Error` dù payload
 hợp lệ, thường PostgreSQL chưa chạy (`docker compose up -d db`) hoặc database chưa có
 bảng (`UndefinedTable: relation "sources" does not exist`). Chạy `alembic upgrade head`
 với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal chạy uvicorn.
+
+## Token quản trị
+
+`POST`/`DELETE /api/v1/sources`, `POST /api/v1/ingestion/run`, `POST /api/v1/ai/process` và
+`POST /api/v1/ai/ask` cần header `X-Admin-Token` khớp `ADMIN_API_TOKEN`. Chưa đặt
+`ADMIN_API_TOKEN` thì các endpoint này trả 503; thiếu hoặc sai token thì trả 401. Tạo token:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
 ## Luồng thử nhanh
 
@@ -129,10 +145,14 @@ pytest --cov=app
 ```
 
 Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy chủ **thử**: đặt
-`TEST_POSTGRES_ADMIN_URL` trỏ tới database `postgres` của máy chủ đó (ví dụ stack
-`ainis_dockertest`, cổng 55432). Mỗi test tự tạo và xóa database `ainis_pytest_*` riêng,
+`TEST_POSTGRES_ADMIN_URL` trỏ tới database `postgres` của máy chủ đó (ví dụ container tạm
+`postgres:17-alpine` publish ở `127.0.0.1`). Mỗi test tự tạo và xóa database `ainis_pytest_*` riêng,
 không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
 case PostgreSQL bị skip, phần SQLite vẫn chạy.
+
+Kết quả đã ghi (`docs/evidence/test_results.txt`, commit `bdd62b6`, 2026-10-24): chỉ SQLite
+259 passed, 129 skipped; SQLite + PostgreSQL 387 passed. `tests/test_ai_pipeline.py` bị skip
+vì Windows Application Control chặn DLL native.
 
 ## AI API
 
@@ -152,8 +172,13 @@ case PostgreSQL bị skip, phần SQLite vẫn chạy.
 
 ## Tìm kiếm tin tức (Q&A)
 
-Mở `http://localhost:8000/` để dùng trang tìm kiếm: nhập yêu cầu (ví dụ "EU AI Act") hoặc
-dán link bài báo rồi bấm Search. API tương ứng: `POST /api/v1/ai/ask` với `{"input": "..."}`.
+Trang `/` gọi `POST /api/v1/ai/search` (public, không cần token): chỉ tìm trong bài đã lưu,
+giới hạn 30 request/phút mỗi địa chỉ (`AI_SEARCH_RATE_PER_MINUTE`, vượt thì 429 kèm
+`Retry-After`), body tối đa 4096 byte (`AI_SEARCH_MAX_BODY_BYTES`), không nhận link (422).
+
+`POST /api/v1/ai/ask` với `{"input": "..."}` cần `X-Admin-Token`; nhận yêu cầu hoặc link bài báo.
+`ASK_ALLOW_LINKS` và `INGESTION_FULL_TEXT` mặc định `true` trong code nhưng `false` trong
+`.env.example`; với `ASK_ALLOW_LINKS=false`, link bị trả 422 trước mọi lệnh gọi mạng.
 
 - Kết quả gồm danh sách bài nguồn (tiêu đề, link, nguồn, ngày, tóm tắt) và một đoạn tổng quan
   có trích dẫn `[1]`, `[2]`. Chỉ tìm trong các bài đã thu thập từ RSS.
@@ -195,9 +220,16 @@ $env:DATABASE_URL = 'sqlite://'
 Remove-Item Env:DATABASE_URL
 ```
 
-## Giới hạn của baseline
+## Kiến trúc và giới hạn đã biết
 
-Analyzer hiện là heuristic để toàn hệ thống chạy không cần API key. Giai đoạn tiếp theo có thể
-thay `HeuristicAnalyzer` bằng BERTopic/embedding/LLM qua cùng interface, thêm
-background worker, full-text/vector search, authentication và monitoring.
+Monolith có lớp (routes → services → repositories → models), không phải microservices.
+Đọc code theo thứ tự: `app/main.py` → `app/api/routes/` → `app/services/ingestion.py` →
+`app/services/analyzer.py` → `app/services/topic_model.py`.
+
+- Rate limit của `/ai/search` nằm trong bộ nhớ, mỗi process đếm riêng.
+- Job AI chạy trong process API (`BackgroundTasks`).
+- T1: còn lỗ DNS rebinding khi tải feed/bài; trình tải bài đọc cả body rồi mới so giới hạn
+  (chưa stream).
+- T2: kiểm tra job đang chạy và tạo job mới không nguyên tử; hai request đồng thời có thể
+  cùng tạo job.
 

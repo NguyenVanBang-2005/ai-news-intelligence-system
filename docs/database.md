@@ -30,7 +30,7 @@ trong `.env` không đổi password của role trong volume đã tồn tại.
 
 Compose chờ DB healthy, chạy `alembic upgrade head` trong service `migrate`, rồi
 mới chạy API. Migrate kết thúc với mã 0 là bình thường. API tại
-<http://localhost:8000/docs>. Cổng API và DB chỉ bind loopback của máy host.
+<http://localhost:8001/docs>. Cổng API và DB chỉ bind loopback của máy host.
 Khi cập nhật schema ở các lần triển khai tiếp theo:
 
 ```powershell
