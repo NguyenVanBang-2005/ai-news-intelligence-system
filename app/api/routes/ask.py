@@ -30,7 +30,11 @@ def ask(payload: AskRequest, db: DbSession) -> AskResponse:
 
     # Imported here so missing ML libraries cannot prevent app.main from loading.
     try:
-        from app.services.news_search import LinkUnreadableError, NewsSearchService
+        from app.services.news_search import (
+            LinkInputDisabledError,
+            LinkUnreadableError,
+            NewsSearchService,
+        )
     except (ImportError, OSError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -39,7 +43,7 @@ def ask(payload: AskRequest, db: DbSession) -> AskResponse:
 
     try:
         result = NewsSearchService(db).ask(payload.input)
-    except LinkUnreadableError as exc:
+    except (LinkUnreadableError, LinkInputDisabledError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

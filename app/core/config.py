@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     ask_min_similarity: float = Field(default=0.8, ge=0, le=1)
     # How many of the newest articles are searched.
     ask_max_candidates: int = Field(default=2000, ge=1)
+    # Whether /ai/ask accepts a link, which the server then downloads. Turn off for demos
+    # where the server must not fetch URLs typed by users.
+    ask_allow_links: bool = True
 
     # Public search (POST /ai/search): requests per client IP per minute (per process),
     # and the largest accepted request body.

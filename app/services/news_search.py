@@ -37,6 +37,8 @@ LINK_NOT_ALLOWED_MESSAGE = (
     "Reading a link requires admin access. Please enter search keywords instead."
 )
 
+LINK_INPUT_DISABLED_MESSAGE = "Link input is disabled (ASK_ALLOW_LINKS=false)."
+
 # News goes stale: a fresh article gets up to this much added to its ranking
 # score, fading over about a week. Similarity still decides what is relevant.
 RECENCY_WEIGHT = 0.05
@@ -49,6 +51,10 @@ class LinkUnreadableError(ValueError):
 
 class LinkNotAllowedError(ValueError):
     """Public search only looks in stored articles; reading a link needs /ai/ask."""
+
+
+class LinkInputDisabledError(ValueError):
+    """/ai/ask got a link while ASK_ALLOW_LINKS is false."""
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,11 @@ class NewsSearchService:
         """Answer a search request, or explain a link, using the stored articles."""
 
         request = request.strip()
+
+        # Checked first: loading the embedding model and reading the link may both use the network.
+        if is_link(request) and not settings.ask_allow_links:
+            raise LinkInputDisabledError(LINK_INPUT_DISABLED_MESSAGE)
+
         model, embedder = self._embedding()
 
         if is_link(request):
