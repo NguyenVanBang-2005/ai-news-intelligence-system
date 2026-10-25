@@ -1,0 +1,31 @@
+test_ai_pipeline in Docker (evidence)
+=====================================
+
+Date:        2026-10-25 (local time, Windows 11 host)
+Commit:      fbd4419 (code identical to f81e97e; fbd4419 adds only evidence)
+Image:       ai-news-intelligence:local
+Image ID:    sha256:2d2bfb151949886d633dad37b08aab3ad5b400b31ff2e7298dddeee05cf751a3
+PostgreSQL:  17 (docker image postgres:17-alpine, temporary container on network ainis_test_net)
+Python:      inside image (not recorded; check with `docker run --rm ai-news-intelligence:local python --version`)
+pytest:      latest from pip at run time (NOT the pinned version in requirements-dev.txt)
+
+Commands:
+  docker network create ainis_test_net
+  docker run --rm -d --name ainis_test_pg --network ainis_test_net -e POSTGRES_PASSWORD=<redacted> postgres:17-alpine
+  docker run --rm --network ainis_test_net -v "<repo>:/work" -w /work \
+    -e "TEST_POSTGRES_ADMIN_URL=postgresql+psycopg://postgres:<redacted>@ainis_test_pg:5432/postgres" \
+    ai-news-intelligence:local \
+    sh -c 'pip install -q pytest && python -m pytest -q -rs -o addopts= -p no:cacheprovider tests/test_ai_pipeline.py; echo EXIT=$?'
+  docker rm -f ainis_test_pg
+  docker network rm ainis_test_net
+
+Result:  43 passed, 0 failed, 0 skipped, 34 warnings in 51.55s
+Exit:    0
+
+Earlier run in the same image WITHOUT TEST_POSTGRES_ADMIN_URL:
+  24 passed, 19 skipped (skip reason: TEST_POSTGRES_ADMIN_URL is not set), exit 0.
+
+Notes:
+- Warnings (34) not yet classified.
+- Only tests/test_ai_pipeline.py was run in this evidence. The full suite in Docker is NOT covered.
+- Host run (Windows, no Docker) of this module is skipped by Application Control (DLL block); this evidence does not cover the host.
