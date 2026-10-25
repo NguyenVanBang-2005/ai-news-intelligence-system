@@ -37,7 +37,9 @@ def anonymous(client: TestClient) -> TestClient:
     return client
 
 
-def call(client: TestClient, method: str, path: str, kwargs: dict, token: str | bytes | None = None):
+def call(
+    client: TestClient, method: str, path: str, kwargs: dict, token: str | bytes | None = None
+):
     headers = {"X-Admin-Token": token} if token is not None else {}
     return client.request(method, path, headers=headers, **kwargs)
 

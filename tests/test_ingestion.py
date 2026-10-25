@@ -368,7 +368,8 @@ def test_endpoint_uses_saved_source_url_and_reports_html_error(db: Session, monk
     feed = FeedClient(5, transport=httpx.MockTransport(handler))
     monkeypatch.setattr("app.services.ingestion.FeedClient", lambda timeout: feed)
     app.dependency_overrides[get_db] = lambda: db
-    client = TestClient(app, headers=ADMIN_HEADERS)  # no lifespan: never initialize the configured application DB
+    # No lifespan: never initialize the configured application DB.
+    client = TestClient(app, headers=ADMIN_HEADERS)
     try:
         response = client.post(
             "/api/v1/ingestion/run",

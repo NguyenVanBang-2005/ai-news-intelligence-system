@@ -49,5 +49,6 @@ class SlidingWindowRateLimiter:
             self._hits.clear()
 
     def _forget_idle(self, window_start: float) -> None:
-        for key in [key for key, hits in self._hits.items() if not hits or hits[-1] <= window_start]:
+        idle = [key for key, hits in self._hits.items() if not hits or hits[-1] <= window_start]
+        for key in idle:
             del self._hits[key]
