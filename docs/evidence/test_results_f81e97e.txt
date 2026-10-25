@@ -1,0 +1,60 @@
+Test results evidence
+=====================
+
+Date:        2026-10-24 (SQLite run started 13:19:27 UTC, PostgreSQL run started 13:20:29 UTC)
+Commit:      f81e97e7667203a9e22eb05b124d36bcd3945555 (f81e97e, working tree clean before the runs)
+Python:      3.14.7 (.venv\Scripts\python.exe)
+pytest:      8.4.2
+Docker:      29.8.0, build 88096ef
+PostgreSQL:  17.11 (image postgres:17-alpine, temporary container ainis_test_pg)
+OS:          Windows 11
+
+Logs were written to a scratch directory outside the repo (sqlite_run.log, pg_run.log),
+so the working tree only gains this file.
+
+
+Run 1 - SQLite only (TEST_POSTGRES_ADMIN_URL not set)
+-----------------------------------------------------
+Commands:
+  unset TEST_POSTGRES_ADMIN_URL
+  python -m pytest -q -rs -o addopts="" > sqlite_run.log 2>&1; echo "exit=$?"
+
+Exit code: 0
+Summary:   246 passed, 132 skipped, 14 warnings in 45.42s
+
+Skip reasons:
+  131  TEST_POSTGRES_ADMIN_URL is not set (no PostgreSQL test server)
+       (PostgreSQL cases in test_admin_auth, test_ai_search, test_ask_allow_links,
+        test_news_search, test_source_types, test_sources_regression, test_topic_registry,
+        test_trending)
+    1  tests\test_ai_pipeline.py:27: AI dependencies unavailable: DLL load failed while
+       importing _hdbscan_reachability: An Application Control policy has blocked this file.
+
+
+Run 2 - SQLite + PostgreSQL (temporary container)
+-------------------------------------------------
+Commands:
+  docker run --rm -d --name ainis_test_pg -e POSTGRES_PASSWORD=<redacted> -p 127.0.0.1::5432 postgres:17-alpine
+  docker port ainis_test_pg 5432          # -> 127.0.0.1:62628
+  export TEST_POSTGRES_ADMIN_URL=postgresql+psycopg://postgres:<redacted>@127.0.0.1:62628/postgres
+                                          # shell session only, not written to .env
+  python -m pytest -q -rs -o addopts="" > pg_run.log 2>&1; echo "exit=$?"
+  docker rm -f ainis_test_pg
+
+Exit code: 0
+Summary:   377 passed, 1 skipped, 26 warnings in 227.40s (0:03:47)
+
+Skip reasons:
+    1  tests\test_ai_pipeline.py:27: AI dependencies unavailable: DLL load failed while
+       importing _hdbscan_reachability: An Application Control policy has blocked this file.
+
+The password was random, kept only in a shell variable, and does not appear in pg_run.log.
+After the run, ainis_test_pg was removed; ainis_main, ainis_e2e and ainis_dockertest
+containers were not touched.
+
+
+Not covered
+-----------
+tests\test_ai_pipeline.py (the BERTopic/HDBSCAN pipeline) was skipped in both runs because
+Windows Application Control blocks the hdbscan native DLL on this machine. That module is
+not verified by this evidence.
