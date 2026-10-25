@@ -150,9 +150,17 @@ Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy c
 không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
 case PostgreSQL bị skip, phần SQLite vẫn chạy.
 
-Kết quả đã ghi (`docs/evidence/test_results.txt`, commit `bdd62b6`, 2026-10-24): chỉ SQLite
-259 passed, 129 skipped; SQLite + PostgreSQL 387 passed. `tests/test_ai_pipeline.py` bị skip
-vì Windows Application Control chặn DLL native.
+Kết quả đã ghi (chỉ có số liệu cho hai commit dưới đây):
+
+| Lần chạy | Commit | Ngày | Kết quả | Evidence |
+|---|---|---|---|---|
+| Toàn bộ suite, chỉ SQLite (host Windows) | `f81e97e` | 2026-10-24 | 246 passed, 132 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
+| Toàn bộ suite, SQLite + PostgreSQL 17 (host Windows) | `f81e97e` | 2026-10-24 | 377 passed, 1 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
+| Chỉ `tests/test_ai_pipeline.py`, trong image `ai-news-intelligence:local` với PostgreSQL 17 (`postgres:17-alpine`, container tạm trên cùng network Docker) | `fbd4419` | 2026-10-25 | 43 passed, 0 failed, 0 skipped | `docs/evidence/test_ai_pipeline_docker_fbd4419.txt` |
+
+Trên host Windows, `tests/test_ai_pipeline.py` bị skip vì Windows Application Control chặn
+DLL native của `hdbscan`; trong Docker module này chạy được. Lần chạy Docker chỉ gồm module
+đó, chưa có kết quả cho toàn bộ suite trong Docker.
 
 ## AI API
 
