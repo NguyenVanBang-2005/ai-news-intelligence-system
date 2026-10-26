@@ -1,5 +1,7 @@
 # AI News Intelligence API
 
+[![CI](https://github.com/NguyenVanBang-2005/ai-news-intelligence-system/actions/workflows/ci.yml/badge.svg)](https://github.com/NguyenVanBang-2005/ai-news-intelligence-system/actions/workflows/ci.yml)
+
 Backend MVP cho hệ thống thu thập, phân loại, tóm tắt và theo dõi chủ đề tin AI.
 
 ## Chức năng hiện có
@@ -150,17 +152,18 @@ Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy c
 không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
 case PostgreSQL bị skip, phần SQLite vẫn chạy.
 
-Kết quả đã ghi (chỉ có số liệu cho hai commit dưới đây):
+Kết quả đã ghi (số liệu theo từng commit dưới đây):
 
 | Lần chạy | Commit | Ngày | Kết quả | Evidence |
 |---|---|---|---|---|
 | Toàn bộ suite, chỉ SQLite (host Windows) | `f81e97e` | 2026-10-24 | 246 passed, 132 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
 | Toàn bộ suite, SQLite + PostgreSQL 17 (host Windows) | `f81e97e` | 2026-10-24 | 377 passed, 1 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
 | Chỉ `tests/test_ai_pipeline.py`, trong image `ai-news-intelligence:local` với PostgreSQL 17 (`postgres:17-alpine`, container tạm trên cùng network Docker) | `fbd4419` | 2026-10-25 | 43 passed, 0 failed, 0 skipped | `docs/evidence/test_ai_pipeline_docker_fbd4419.txt` |
+| CI GitHub Actions (Ubuntu, Python 3.12, PostgreSQL 17), run #2, trigger push lên main | `f883293` | 2026-10-26 | 420 passed, 0 failed, 0 skipped | `docs/evidence/ci_f883293.txt` |
 
 Trên host Windows, `tests/test_ai_pipeline.py` bị skip vì Windows Application Control chặn
 DLL native của `hdbscan`; trong Docker module này chạy được. Lần chạy Docker chỉ gồm module
-đó, chưa có kết quả cho toàn bộ suite trong Docker.
+đó, chưa có kết quả cho toàn bộ suite trong Docker. `test_ai_pipeline` cũng chạy trong CI vì runner cài `requirements-dev.txt`.
 
 ## AI API
 

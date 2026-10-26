@@ -1,0 +1,9 @@
+Ngay: 2026-10-26
+Commit: f883293
+Workflow: .github/workflows/ci.yml, run #2, trigger push len main
+Trang thai: Success, thoi luong 5m 28s
+Tong ket pytest: 420 passed, 58 warnings in 185.64s (0:03:05)
+Annotation:
+- Canh bao Node.js 20 deprecated (actions/checkout@v4, actions/setup-python@v5)
+- Canh bao ubuntu-latest chuyen sang Ubuntu 26
+Ghi chu: khong co mat khau hay gia tri bi mat nao trong file.
