@@ -148,7 +148,11 @@ def test_unmigrated_postgres_is_the_real_cause_of_500_until_alembic_runs(
 
 
 def fake_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_getaddrinfo = socket.getaddrinfo
+
     def getaddrinfo(host: str, port: int, *args: object, **kwargs: object) -> list:
+        if host in ("localhost", "127.0.0.1", "::1"):
+            return real_getaddrinfo(host, port, *args, **kwargs)
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
 
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
