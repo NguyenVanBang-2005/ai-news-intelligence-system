@@ -1,0 +1,56 @@
+PostgreSQL restart + backup/restore verification
+=================================================
+Date:        2026-10-27
+Commit:      229f9d0 (working tree clean, no code changes)
+PostgreSQL:  17.11 (Debian 17.11-1.pgdg13+2), image postgres:17
+Project:     ainis_fresh   API_PORT=8002   POSTGRES_PORT=55434 (55433 was held by another stack, so not used)
+Env file:    outside the repo, passed with --env-file and APP_ENV_FILE. Random POSTGRES_PASSWORD and
+             ADMIN_API_TOKEN, values <redacted>.
+
+Commands (DC = docker compose --env-file <fresh.env> -p ainis_fresh -f compose.yaml -f compose.override.yaml)
+  1. DC up -d                 -> health 200 at /api/v1/health (image built earlier by `up -d --build`)
+  2. POST /api/v1/sources  (X-Admin-Token: <redacted>)  name=BBC News, type=rss,
+       feed_url=https://feeds.bbci.co.uk/news/rss.xml
+     POST /api/v1/ingestion/run (X-Admin-Token: <redacted>)
+       -> sources_processed=1 articles_seen=33 articles_created=30 duplicates_skipped=3 errors=[]
+  3a. DC restart
+  3b. DC down   (no -v);  DC up -d
+  4. DC exec -T db pg_dump -U <user> -Fc <db> > backups/ainis_fresh_verify.dump
+     docker exec -i ainis_fresh-db-1 pg_restore --list < dump
+  5. DC down -v;  DC up -d
+  6. DC stop api
+     docker exec -i ainis_fresh-db-1 pg_restore --clean --if-exists --no-owner -U <user> -d <db> < dump
+     DC start api
+  7. DC down -v   (only -p ainis_fresh)
+
+Snapshots (sources / articles / topics / ai_jobs / alembic_version / sample article)
+  After ingestion : 1 / 30 / 0 / 0 / 0005_source_types / 1 | Two men charged under National Security Act after RAF Fairford incident
+                    health=200, GET /api/v1/articles total=30
+  After restart   : identical to the above; health=200, API total=30
+  After down/up   : identical (volume ainis_fresh_postgres_data kept); health=200, API total=30
+  After down -v   : health=200 (migrate created an empty schema); GET /api/v1/articles total=0, items=[]
+  After restore   : 1 / 30 / 0 / 0 / 0005_source_types / sample id 1, same title; health=200,
+                    GET /api/v1/articles total=30, id 1 present. Matches the first snapshot exactly.
+
+Dump
+  File:   backups/ainis_fresh_verify.dump (gitignored by .gitignore line 8 "backups/", not committed)
+  Size:   29785 bytes
+  sha256: 92c80388afe9694ab954f9c9114e8b4cd96505cf178376f1a074b8fd20853085
+  pg_restore --list: 36 entries
+  pg_restore warnings: none (restore log empty, exit code 0)
+
+Results
+  Restart (container restart)  : PASS
+  down without -v (volume kept): PASS
+  Backup (pg_dump -Fc)         : PASS
+  Restore (down -v -> restore) : PASS
+
+Cleanup: down -v on ainis_fresh; 0 ainis_fresh containers, 0 ainis_fresh volumes remain.
+         ainis_main, ainis_e2e, ainis_dockertest were not touched.
+
+Limits
+  - Verified on a single machine only.
+  - No automatic or scheduled backups exist; the backup here was run by hand.
+  - Dump stays on the local disk, with no off-machine copy.
+  - topics and ai_jobs were 0 rows, so their restore was not exercised with data.
+  - The "empty" check used the API total=0 (the psql snapshot printed a blank line on the empty DB).
