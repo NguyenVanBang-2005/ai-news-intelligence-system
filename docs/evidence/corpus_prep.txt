@@ -1,0 +1,86 @@
+Corpus prep evidence - project ainis_main (2026-10-27)
+=====================================================
+Corpus = real articles from RSS. Synthetic data (tests/fixtures, tests/e2e/seed_corpus.py)
+was NOT loaded. Only the HTTP API was used (X-Admin-Token) and SQL was read-only.
+No commit made. The token value is not recorded anywhere.
+
+Step 1 - backup before loading corpus
+  file : backups\ainis_main_before_corpus.dump (245,895 bytes)
+  check: pg_restore --list reads it, 51 lines
+
+Environment change (must be known when reading the results)
+  - Container ainis_main-api-1 was RECREATED (not rebuilt, not migrated) so it loads
+    ADMIN_API_TOKEN from AINIS_ADMIN_TOKEN.
+  - Image ai-news-intelligence:local, built 27/10 11:27, has NO migration 0006.
+  - Database untouched by the recreate: ainis_main-db-1 kept running, volume unchanged,
+    alembic_version stayed 0005_source_types (still 0005 after all steps below).
+  - No other container was touched (ainis_e2e-*, ainis_dockertest-* untouched).
+
+Step 2 - baseline BEFORE (read-only SQL)
+  rows: ai_jobs 0 | articles 50 | sources 1 | topics 0
+  source: id 1 "MIT Research" (https://news.mit.edu/rss/research)
+  articles: 50, all status=analyzed, published 2026-08-19..2026-09-30,
+            embedding 50/50, summary 50/50, ai_summary 0/50
+  topic distribution (total 50):
+    AI Research 33 | Computer Vision 8 | Robotics 4 | Generative AI 2
+    AI Policy 2 | AI Business 1
+
+Step 3 - sources added via POST /api/v1/sources (all HTTP 201, type rss, en)
+  id 2 BBC Technology  https://feeds.bbci.co.uk/news/technology/rss.xml
+  id 3 TechCrunch AI   https://techcrunch.com/category/artificial-intelligence/feed/
+  id 4 The Verge AI    https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+
+Step 4 - POST /api/v1/ingestion/run?source_id=<id>, one source at a time
+  source              time      seen  created  duplicates  errors
+  2 BBC Technology    7.45 s     20     20        0         []
+  3 TechCrunch AI     3.99 s     20     20        0         []
+  4 The Verge AI      3.19 s     10     10        0         []
+  Stop rule (<10 articles or any error) not triggered.
+
+Step 5 - POST /api/v1/ai/process once, body {} (no force, limit default 500)
+  job ea5c41c7-fe13-4300-8caa-006b7e4619b9: pending -> running -> succeeded
+  started 12:18:16Z, finished 12:19:55Z (about 99 s)
+  documents_received 99, unique_documents 99, semantic_duplicates 0,
+  topics_created 2, articles_updated 99, confidence_method hdbscan_soft,
+  topic_coherence 0.0864
+  Observation: without force the job still took the 50 MIT articles (status "analyzed")
+  and the 49 new ones; the 1 other new article has status missing_content (BBC id 62)
+  and was not processed. So the MIT topic labels from Step 2 were OVERWRITTEN.
+  The Step 2 labels remain recoverable from the Step 1 backup.
+
+Step 6 - numbers AFTER (read-only SQL)
+  rows: articles 100 | sources 4 | topics 2 | ai_jobs 1 | alembic_version 0005_source_types
+  status: ai_analyzed 99 | missing_content 1
+  embedding 99/100, ai_summary 0/100, confidence avg 0.704 (min 0.4, max 1.0)
+
+  articles per source: MIT Research 50 | BBC Technology 20 | TechCrunch AI 20 | The Verge AI 10
+
+  source x topic
+  topic                                           MIT  BBC  TC  Verge  total
+  robot · intelligence · ai · agents               20    8  16    8      52
+  Other / Outlier                                  19   11   4    2      36
+  cancer cells · cancers · cancer · living cells   11    0   0    0      11
+  AI Policy (BBC id 62, missing_content)            0    1   0    0       1
+  total                                            50   20  20   10     100
+
+  Comparison with the 50-article MIT snapshot (Step 2)
+  - Snapshot labels: AI Research 33 | Computer Vision 8 | Robotics 4 | Generative AI 2
+    | AI Policy 2 | AI Business 1 (6 labels, editorial names).
+  - Now the same 50 MIT articles: 20 "robot · intelligence · ai · agents",
+    19 "Other / Outlier", 11 "cancer cells ...". None of the 6 old labels remains on
+    an MIT article. Only 3 clusters/labels cover everything, all keyword-style.
+  - The single remaining "AI Policy" label is a BBC article with status
+    missing_content, not an MIT one and not a model output.
+
+  AI_ZEROSHOT_TOPICS (app/core/config.py line 38) : default empty list. Effective value
+  inside ainis_main-api-1 (printed that one setting only, .env not read or printed): [].
+  Labels matching AI_ZEROSHOT_TOPICS: 0 of 4 (the list is empty, so zero-shot naming
+  did not run). ai_zeroshot_min_similarity = 0.7.
+  The topic names above are keyword strings of the clusters, not editorial
+  categories.
+
+Open points for the owner
+  - Corpus is now 100 real articles; the 50 MIT labels from Step 2 are gone from the
+    live DB (restore from backups\ainis_main_before_corpus.dump if needed).
+  - Setting AI_ZEROSHOT_TOPICS (needs a container restart/recreate) is required if
+    editorial labels are wanted; nothing was changed for that here.
