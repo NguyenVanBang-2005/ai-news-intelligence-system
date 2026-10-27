@@ -1,11 +1,11 @@
 import re
+from contextlib import closing
 from dataclasses import dataclass
-from urllib.parse import urljoin
 
 import httpx
 import trafilatura
 
-from app.services.feed import validate_public_url
+from app.services.safe_http import make_client, open_stream, read_limited
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,9 @@ class ArticleContentExtractor:
         timeout_seconds: float,
         max_download_bytes: int,
         max_redirects: int,
+        transport: httpx.BaseTransport | None = None,
     ):
+        self.transport = transport
         self.timeout_seconds = timeout_seconds
         self.max_download_bytes = max_download_bytes
         self.max_redirects = max_redirects
@@ -64,57 +66,32 @@ class ArticleContentExtractor:
     def _download_html(self, url: str) -> str | None:
         """Download an HTML page from a public address, or return None."""
 
-        current_url = url
+        headers = {
+            "User-Agent": "AI-News-Intelligence/0.2",
+            "Accept": "text/html,application/xhtml+xml",
+        }
 
         try:
-            with httpx.Client(
-                timeout=self.timeout_seconds,
-                follow_redirects=False,
-            ) as client:
-                for _ in range(self.max_redirects + 1):
-                    # Recheck every redirect target to reduce SSRF risk.
-                    validate_public_url(current_url)
-
-                    response = client.get(
-                        current_url,
-                        headers={
-                            "User-Agent": "AI-News-Intelligence/0.2",
-                            "Accept": "text/html,application/xhtml+xml",
-                        },
-                    )
-
-                    if response.is_redirect:
-                        location = response.headers.get("location")
-                        if not location:
-                            return None
-
-                        current_url = urljoin(current_url, location)
-                        continue
-
+            # Every redirect hop is resolved and checked again inside the client.
+            with make_client(self.timeout_seconds, self.transport) as client:
+                response = open_stream(client, url, headers, self.max_redirects)
+                with closing(response):
                     response.raise_for_status()
 
-                    content_type = response.headers.get(
-                        "content-type",
-                        "",
-                    ).lower()
-
-                    if "html" not in content_type:
+                    if "html" not in response.headers.get("content-type", "").lower():
                         return None
 
-                    if len(response.content) > self.max_download_bytes:
-                        return None
-
-                    return response.text
+                    body = read_limited(response, self.max_download_bytes)
+                    return body.decode(response.encoding or "utf-8", errors="replace")
 
         except (
             httpx.HTTPError,
             UnicodeError,
             ValueError,
             OSError,
+            LookupError,
         ):
             return None
-
-        return None
 
     @staticmethod
     def clean_rss_content(content: str) -> str:

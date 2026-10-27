@@ -1,6 +1,5 @@
-import ipaddress
 import logging
-import socket
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -10,6 +9,12 @@ import httpx
 from dateutil import parser as date_parser
 
 from app.core.config import settings
+from app.services.safe_http import (
+    ResponseTooLargeError,
+    make_client,
+    open_stream,
+    read_limited,
+)
 from app.services.text_cleaning import clean_text, truncate
 
 # Keep in sync with the Article column sizes.
@@ -26,10 +31,6 @@ class FeedItem:
     author: str | None
     content: str
     published_at: datetime | None
-
-
-class UnsafeFeedUrlError(ValueError):
-    pass
 
 
 class FeedTooLargeError(ValueError):
@@ -61,20 +62,6 @@ def valid_article_url(raw: object) -> str | None:
     return url
 
 
-def validate_public_url(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise UnsafeFeedUrlError("Only public HTTP(S) feed URLs are accepted")
-    try:
-        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
-    except socket.gaierror as exc:
-        raise UnsafeFeedUrlError("Feed hostname could not be resolved") from exc
-    for address in addresses:
-        ip = ipaddress.ip_address(address[4][0])
-        if not ip.is_global:
-            raise UnsafeFeedUrlError("Private or local feed addresses are not accepted")
-
-
 class FeedClient:
     def __init__(
         self,
@@ -90,13 +77,10 @@ class FeedClient:
         self.max_content_chars = max_content_chars or settings.max_article_content_chars
 
     def fetch(self, url: str, max_items: int) -> list[FeedItem]:
-        validate_public_url(url)
-        with httpx.Client(
-            timeout=self.timeout_seconds, follow_redirects=False, transport=self.transport
-        ) as client:
-            with client.stream(
-                "GET", url, headers={"User-Agent": "AI-News-Intelligence/0.1"}
-            ) as response:
+        headers = {"User-Agent": "AI-News-Intelligence/0.1"}
+        with make_client(self.timeout_seconds, self.transport) as client:
+            response = open_stream(client, url, headers, settings.article_max_redirects)
+            with closing(response):
                 response.raise_for_status()
                 body = self._read_limited(response)
                 content_type = response.headers.get("content-type", "unknown")
@@ -124,15 +108,10 @@ class FeedClient:
 
     def _read_limited(self, response: httpx.Response) -> bytes:
         """Read the (decoded) body, aborting as soon as it exceeds the byte limit."""
-        declared = response.headers.get("Content-Length", "")
-        if declared.isdigit() and int(declared) > self.max_feed_bytes:
-            raise FeedTooLargeError(f"Feed exceeds {self.max_feed_bytes} bytes")
-        body = bytearray()
-        for chunk in response.iter_bytes():
-            body.extend(chunk)
-            if len(body) > self.max_feed_bytes:
-                raise FeedTooLargeError(f"Feed exceeds {self.max_feed_bytes} bytes")
-        return bytes(body)
+        try:
+            return read_limited(response, self.max_feed_bytes)
+        except ResponseTooLargeError as exc:
+            raise FeedTooLargeError(f"Feed exceeds {self.max_feed_bytes} bytes") from exc
 
     def _to_item(self, entry: dict) -> FeedItem | None:
         url = valid_article_url(entry.get("link"))
