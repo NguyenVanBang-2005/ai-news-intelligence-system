@@ -12,3 +12,7 @@ dist/
 
 .docker-test/
 .env-backup/
+
+# raw corpus has article excerpts (copyright); commit labels-only files instead
+data/corpus/corpus_to_label.csv
+data/corpus/*_raw.csv

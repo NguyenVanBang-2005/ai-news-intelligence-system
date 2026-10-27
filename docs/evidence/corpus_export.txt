@@ -1,0 +1,12 @@
+Corpus export for manual labeling (read-only)
+Date (UTC): 2026-10-27
+Base commit: e9a6aaa (scripts/export_corpus.py and tests/test_export_corpus.py uncommitted)
+Run: docker exec in ainis_main-api-1 (WORKDIR /app, PYTHONPATH=/app), script copied to /tmp then removed
+Parameters: --size 50 --seed 42 --labelers 4 --shared 10
+Exported: 50
+By source: The Verge AI 10, BBC Technology 13, MIT Research 14, TechCrunch AI 13
+By system_topic: Other / Outlier 20 (40%); "robot · intelligence · ai · agents" 28; "cancer cells · cancers · cancer · living cells" 2
+By assigned_to: all 10, L1 10, L2 10, L3 10, L4 10
+Excluded (status != ai_analyzed): 1 (missing_content)
+Checks: 50 unique article_id, no id 62, 10 rows "all"
+Tests: pytest 286 passed, 166 skipped (no Postgres test server), 0 failed; ruff clean
