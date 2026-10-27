@@ -25,24 +25,33 @@ def run_ai_job(job_id: str, session_factory: sessionmaker[Session]) -> None:
 
     with session_factory() as db:
         jobs = AIJobRepository(db)
-        job = jobs.get(job_id)
-        jobs.mark_running(job)
-
         try:
-            result = _process(db, job.parameters)
-        except NotEnoughDocumentsError as exc:
-            error = str(exc)
-        except EmbeddingModelUnavailableError:
-            error = MODEL_UNAVAILABLE_MESSAGE
+            _run(db, jobs, job_id)
         except Exception:
-            logger.exception("AI job %s failed", job_id)
-            error = PROCESSING_FAILED_MESSAGE
-        else:
-            jobs.mark_succeeded(job, asdict(result))
-            return
+            logger.exception("AI job %s crashed", job_id)
+            db.rollback()
+            jobs.release_active_key(job_id, PROCESSING_FAILED_MESSAGE)
 
-        db.rollback()
-        jobs.mark_failed(job, error)
+
+def _run(db: Session, jobs: AIJobRepository, job_id: str) -> None:
+    job = jobs.get(job_id)
+    jobs.mark_running(job)
+
+    try:
+        result = _process(db, job.parameters)
+    except NotEnoughDocumentsError as exc:
+        error = str(exc)
+    except EmbeddingModelUnavailableError:
+        error = MODEL_UNAVAILABLE_MESSAGE
+    except Exception:
+        logger.exception("AI job %s failed", job_id)
+        error = PROCESSING_FAILED_MESSAGE
+    else:
+        jobs.mark_succeeded(job, asdict(result))
+        return
+
+    db.rollback()
+    jobs.mark_failed(job, error)
 
 
 def _process(db: Session, parameters: dict):

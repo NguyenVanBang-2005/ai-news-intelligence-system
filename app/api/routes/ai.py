@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.deps import DbSession, SessionFactory, require_admin
 from app.core.config import settings
-from app.repositories.ai_job import AIJobRepository
+from app.repositories.ai_job import AIJobAlreadyActiveError, AIJobRepository
 from app.repositories.article import ArticleRepository
 from app.repositories.topic import TopicRepository
 from app.schemas.ai import (
@@ -73,7 +73,15 @@ def process_articles(
             detail=f"AI job {active_job.id} is still {active_job.status}.",
         )
 
-    job = jobs.create(payload.model_dump())
+    try:
+        job = jobs.create(
+            payload.model_dump(), max_age_seconds=settings.ai_job_timeout_seconds
+        )
+    except AIJobAlreadyActiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An AI job is already running.",
+        ) from exc
     background_tasks.add_task(run_ai_job, job.id, session_factory)
 
     return job
