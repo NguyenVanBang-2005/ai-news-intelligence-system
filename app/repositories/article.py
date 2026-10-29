@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.article import Article
 
@@ -73,6 +73,7 @@ class ArticleRepository:
         total = self.db.scalar(select(func.count(Article.id)).where(*filters)) or 0
         statement = (
             select(Article)
+            .options(joinedload(Article.source))  # source_name without a query per article
             .where(*filters)
             .order_by(Article.published_at.desc().nulls_last(), Article.id.desc())
             .limit(limit)
@@ -81,7 +82,7 @@ class ArticleRepository:
         return list(self.db.scalars(statement)), total
 
     def get(self, article_id: int) -> Article | None:
-        return self.db.get(Article, article_id)
+        return self.db.get(Article, article_id, options=[joinedload(Article.source)])
 
     def get_many(self, article_ids: set[int]) -> list[Article]:
         if not article_ids:

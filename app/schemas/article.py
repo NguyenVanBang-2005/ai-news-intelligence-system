@@ -8,6 +8,8 @@ class ArticleRead(BaseModel):
 
     id: int
     source_id: int
+    # Read from Article.source_name; the repository loads the source with the article.
+    source_name: str
     title: str
     url: str
     author: str | None

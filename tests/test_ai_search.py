@@ -104,6 +104,24 @@ def test_results_have_no_answer_and_at_most_max_sources(
     assert len(body["sources"]) == 2
 
 
+def test_results_carry_the_article_topic(anonymous: TestClient, engine: Engine) -> None:
+    ids = seed(engine, groups=(0,))
+    embed_stored(engine)
+    labelled_id = ids[0][0]
+    with Session(engine) as db:
+        db.get(Article, labelled_id).topic = "AI Policy"
+        db.commit()
+
+    sources = search(anonymous, "G0 latest").json()["sources"]
+
+    by_id = {source["id"]: source["topic"] for source in sources}
+    assert by_id[labelled_id] == "AI Policy"
+    # Unlabelled articles report null rather than dropping the field.
+    assert [topic for article_id, topic in by_id.items() if article_id != labelled_id] == [
+        None
+    ] * (len(by_id) - 1)
+
+
 # --- summaries --------------------------------------------------------------------------
 
 

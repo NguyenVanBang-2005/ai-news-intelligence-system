@@ -63,13 +63,35 @@ với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal ch�
 
 ## Token quản trị
 
-`POST`/`DELETE /api/v1/sources`, `POST /api/v1/ingestion/run`, `POST /api/v1/ai/process` và
+`POST /api/v1/sources`, `PATCH`/`DELETE /api/v1/sources/{source_id}`,
+`POST /api/v1/ingestion/run`, `POST /api/v1/ai/process` và
 `POST /api/v1/ai/ask` cần header `X-Admin-Token` khớp `ADMIN_API_TOKEN`. Chưa đặt
 `ADMIN_API_TOKEN` thì các endpoint này trả 503; thiếu hoặc sai token thì trả 401. Tạo token:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+## Danh sách endpoint
+
+Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
+
+| Method | Path | Auth | Ghi chú |
+|---|---|---|---|
+| GET | `/health` | public | `{"status": "ok"}` |
+| GET | `/sources` | public | `SourceRead`: `id`, `name`, `type`, `feed_url`, `query`, `language`, `is_active`, `created_at` |
+| POST | `/sources` | admin | `SourceCreate`; 201, 409 nếu trùng tên hoặc `feed_url` |
+| PATCH | `/sources/{source_id}` | admin | Body `{"is_active": bool}`; trả `SourceRead`, 404 nếu không có. Nguồn tắt bị ingestion bỏ qua |
+| DELETE | `/sources/{source_id}` | admin | 204; xóa luôn mọi bài của nguồn (cascade) |
+| POST | `/ingestion/run` | admin | Query `source_id` tùy chọn; trả `sources_processed`, `articles_seen`, `articles_created`, `duplicates_skipped`, `errors` |
+| GET | `/articles` | public | Query `topic`, `status`, `limit` (1-100), `offset`; trả `items`, `total`, `limit`, `offset` |
+| GET | `/articles/{article_id}` | public | `ArticleRead`: `id`, `source_id`, `source_name`, `title`, `url`, `author`, `content`, `summary`, `topic`, `confidence`, `status`, `published_at`, `created_at` |
+| GET | `/topics/trending` | public | Query `window_hours`, `baseline_days`, `min_articles`, `limit`; trả `topic`, `article_count`, `expected_count`, `trend_score` |
+| GET | `/ai/topics` | public | `id`, `label`, `size`, `keywords`, `representative_articles`, `updated_at` |
+| POST | `/ai/search` | public, rate limit | Body `{"input": "..."}`; `sources[]`: `id`, `title`, `url`, `source_name`, `topic`, `published_at`, `similarity`, `summary`, `summary_method` |
+| POST | `/ai/ask` | admin | Như `/ai/search` nhưng nhận link, gọi LLM và trả thêm `answer` |
+| POST | `/ai/process` | admin | 202 kèm job `id` |
+| GET | `/ai/process/{job_id}` | public | Trạng thái job |
 
 ## Luồng thử nhanh
 

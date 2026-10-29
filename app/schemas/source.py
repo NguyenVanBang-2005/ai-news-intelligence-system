@@ -42,6 +42,12 @@ class SourceCreate(BaseModel):
         return self
 
 
+class SourceUpdate(BaseModel):
+    """Fields an admin may change on a saved source."""
+
+    is_active: bool
+
+
 class SourceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
