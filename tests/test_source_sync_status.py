@@ -15,6 +15,7 @@ from app.models.article import Article
 from app.models.source import LAST_ERROR_MAX_CHARS, Source
 from app.services.feed import FeedClient
 from app.services.ingestion import IngestionService
+from app.services.safe_http import TooManyRedirectsError
 from app.services.sync_errors import UNEXPECTED_ERROR_MESSAGE, short_error_message
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -23,6 +24,7 @@ EMPTY_URL = "https://empty-feed.example/rss.xml"
 HTML_URL = "https://html-page.example/news"
 FAILING_URL = "https://failing-feed.example/rss.xml"
 PRIVATE_URL = "https://intranet-feed.example/rss.xml"
+LOOP_URL = "https://redirect-loop.example/rss.xml"
 PRIVATE_IP = "10.1.2.3"
 EMPTY_RSS = b'<rss version="2.0"><channel><title>Empty</title></channel></rss>'
 
@@ -36,6 +38,8 @@ def serve(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=EMPTY_RSS)
     if url == HTML_URL:
         return httpx.Response(200, text="<html><body>Not a feed</body></html>")
+    if url == LOOP_URL:  # redirects to itself forever
+        return httpx.Response(302, headers={"Location": LOOP_URL})
     return httpx.Response(500, text=f"upstream at {url} exploded")
 
 
@@ -260,6 +264,23 @@ def test_message_is_cut_to_the_column_size() -> None:
     long_named = type("E" * 400, (Exception,), {})
 
     assert len(short_error_message(long_named())) == LAST_ERROR_MAX_CHARS
+
+
+def test_redirect_loop_gets_its_own_message(engine: Engine) -> None:
+    source_id = add_source(engine, "Loop", LOOP_URL)
+
+    run(engine)
+
+    assert sync_state(engine, source_id)[1:] == (
+        "error", "TooManyRedirectsError: Too many redirects"
+    )
+
+
+def test_too_many_redirects_is_no_longer_unexpected() -> None:
+    message = short_error_message(TooManyRedirectsError("Too many redirects"))
+
+    assert message == "TooManyRedirectsError: Too many redirects"
+    assert UNEXPECTED_ERROR_MESSAGE not in message
 
 
 def test_timeouts_have_their_own_message() -> None:

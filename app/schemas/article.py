@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,4 +37,20 @@ class TrendingTopic(BaseModel):
     expected_count: float
     # Standard deviations above normal; higher means a stronger burst.
     trend_score: float
+
+
+class TimeseriesPoint(BaseModel):
+    # A UTC calendar day, serialized as "YYYY-MM-DD".
+    date: date
+    # Articles of the topic on that day; 0 when there were none.
+    count: int
+
+
+class TopicTimeseriesRead(BaseModel):
+    topic: str
+    # Same values as GET /topics/trending: score and count of the recent window.
+    trend_score: float
+    article_count: int
+    # One point per day, oldest first, ending with today (UTC).
+    points: list[TimeseriesPoint]
 

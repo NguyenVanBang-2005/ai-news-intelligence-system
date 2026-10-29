@@ -87,6 +87,7 @@ Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
 | GET | `/articles` | public | Query `topic`, `status`, `limit` (1-100), `offset`; trả `items`, `total`, `limit`, `offset` |
 | GET | `/articles/{article_id}` | public | `ArticleRead`: `id`, `source_id`, `source_name`, `title`, `url`, `author`, `content`, `summary`, `topic`, `confidence`, `status`, `published_at`, `created_at` |
 | GET | `/topics/trending` | public | Query `window_hours`, `baseline_days`, `min_articles`, `limit`; trả `topic`, `article_count`, `expected_count`, `trend_score` |
+| GET | `/topics/timeseries` | public | Query `days` (1-30, mặc định 7), `limit` (1-10, mặc định 3), `window_hours`, `baseline_days`, `min_articles` (như trending); trả `topic`, `trend_score`, `article_count`, `points[]` (`date` "YYYY-MM-DD" theo UTC, `count`). Xem "Chuỗi thời gian chủ đề" |
 | GET | `/ai/topics` | public | `id`, `label`, `size`, `keywords`, `representative_articles`, `updated_at` |
 | POST | `/ai/search` | public, rate limit | Body `{"input": "..."}`; `sources[]`: `id`, `title`, `url`, `source_name`, `topic`, `published_at`, `similarity`, `summary`, `summary_method` |
 | POST | `/ai/ask` | admin | Như `/ai/search` nhưng nhận link, gọi LLM và trả thêm `answer` |
@@ -109,6 +110,26 @@ Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
 3. Xem `GET /api/v1/articles` và `GET /api/v1/topics/trending`. Trending so sánh số bài
    trong `window_hours` gần nhất (mặc định 24) với mức bình thường của `baseline_days`
    ngày trước đó (mặc định 7); `trend_score` là số độ lệch chuẩn vượt mức bình thường.
+
+### Chuỗi thời gian chủ đề
+
+`GET /api/v1/topics/timeseries` trả số bài mỗi ngày của các chủ đề đang trending, cho biểu đồ.
+
+- Chọn chủ đề bằng chính `TrendingTopicsService` của `/topics/trending` (cùng `trend_score`,
+  cùng `window_hours`/`baseline_days`/`min_articles`), lấy `limit` chủ đề có `trend_score` cao
+  nhất, xếp giảm dần. Nhãn catch-all `Other` và `Other / Outlier` bị loại. Không có chủ đề nào
+  đủ điều kiện thì trả `[]`.
+- `trend_score` và `article_count` giống hệt `/topics/trending`: `article_count` là số bài trong
+  cửa sổ `window_hours`, không phải tổng các `points`.
+- `points`: đúng `days` ngày **UTC** liên tiếp, cũ nhất trước, kết thúc ở ngày UTC hiện tại.
+  Ngày không có bài vẫn có điểm với `count: 0` (zero-fill). Thời điểm của bài là
+  `published_at`, nếu thiếu thì `created_at` (như trending). Bài có `published_at` ở tương lai
+  (sau hôm nay theo UTC) không được đếm.
+- Đếm theo ngày bằng Python (không dùng hàm ngày riêng của SQLite/PostgreSQL), nên kết quả như
+  nhau trên hai DB. Một request chạy tối đa 2 truy vấn: một cho trending, một lấy
+  `(topic, thời điểm)` của các chủ đề đã chọn.
+- Giới hạn: đọc tối đa `TIMESERIES_MAX_ROWS` = 50.000 dòng mỗi request
+  (`app/services/topic_timeseries.py`), mới nhất trước. Nếu vượt, các ngày cũ nhất bị đếm thiếu.
 
 ### Loại nguồn: RSS/Atom và News API
 

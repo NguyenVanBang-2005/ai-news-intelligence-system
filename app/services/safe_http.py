@@ -15,6 +15,10 @@ class ResponseTooLargeError(ValueError):
     pass
 
 
+class TooManyRedirectsError(ValueError):
+    """The server kept redirecting past max_redirects."""
+
+
 def resolve_public_addresses(url: str) -> tuple[str, list[str], int]:
     """Resolve the host once; return (hostname, checked IPs with IPv4 first, port) or raise."""
     parsed = urlparse(url)
@@ -95,7 +99,7 @@ def open_stream(
         if not location:
             raise ValueError("Redirect without a Location header")
         url = urljoin(url, location)
-    raise ValueError("Too many redirects")
+    raise TooManyRedirectsError("Too many redirects")
 
 
 def read_limited(response: httpx.Response, max_bytes: int) -> bytes:

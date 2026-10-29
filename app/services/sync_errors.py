@@ -10,7 +10,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.source import LAST_ERROR_MAX_CHARS
 from app.services.feed import FeedTooLargeError, UnsupportedFeedError
 from app.services.news_api import NewsApiError, NewsApiNotConfiguredError
-from app.services.safe_http import ResponseTooLargeError, UnsafeFeedUrlError
+from app.services.safe_http import (
+    ResponseTooLargeError,
+    TooManyRedirectsError,
+    UnsafeFeedUrlError,
+)
 
 UNEXPECTED_ERROR_MESSAGE = "Unexpected error"
 
@@ -21,6 +25,7 @@ ERROR_MESSAGES: tuple[tuple[type[BaseException], str], ...] = (
     (FeedTooLargeError, "Feed is larger than the size limit"),
     (ResponseTooLargeError, "Response is larger than the size limit"),
     (UnsafeFeedUrlError, "Blocked non-public or unresolvable address"),
+    (TooManyRedirectsError, "Too many redirects"),
     (httpx.TimeoutException, "Request timed out"),
     (httpx.ConnectError, "Could not connect to the server"),
     (httpx.HTTPStatusError, "Server answered with an error status"),

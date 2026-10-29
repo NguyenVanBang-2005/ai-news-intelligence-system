@@ -124,6 +124,27 @@ class ArticleRepository:
             for topic, recent_count, baseline_count in self.db.execute(statement).all()
         ]
 
+    def topic_timestamps(
+        self, *, topics: list[str], start: datetime, end: datetime, max_rows: int
+    ) -> list[tuple[str, datetime]]:
+        """(topic, article time) for articles of these topics in [start, end), newest first.
+
+        Article time is coalesce(published_at, created_at), as in topic_counts. At most
+        max_rows rows are read, so when the cap is hit the oldest ones are left out.
+        """
+        article_time = func.coalesce(Article.published_at, Article.created_at)
+        statement = (
+            select(Article.topic, article_time)
+            .where(
+                Article.topic.in_(topics),
+                article_time >= start,
+                article_time < end,
+            )
+            .order_by(article_time.desc())
+            .limit(max_rows)
+        )
+        return [(topic, moment) for topic, moment in self.db.execute(statement).all()]
+
     @staticmethod
     def _ai_processing_filters(*, force: bool) -> list:
         filters = [
