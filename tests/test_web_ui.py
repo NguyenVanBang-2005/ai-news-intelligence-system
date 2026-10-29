@@ -118,7 +118,10 @@ def test_the_expected_modules_exist() -> None:
     assert {"app.js", "js/api.js", "js/dom.js", "js/format.js", "js/router.js",
             "js/components.js", "js/pages/search.js", "js/trending.js", "js/drawer.js",
             "js/pages/search-results.js", "js/pages/trending-ui.js",
-            "js/pages/article-drawer.js"} <= names
+            "js/pages/article-drawer.js", "js/focus-trap.js", "js/admin-token.js",
+            "js/confirm-dialog.js", "js/pages/sources.js", "js/pages/admin-access.js",
+            "js/pages/rescan.js", "js/pages/source-form.js", "js/pages/source-list.js",
+            "js/pages/source-status.js", "js/pages/classified-list.js"} <= names
 
 
 def test_every_static_reference_in_index_exists() -> None:
@@ -223,3 +226,64 @@ def test_scripts_never_write_html_or_eval(path) -> None:
 
     for forbidden in FORBIDDEN_IN_JS:
         assert forbidden not in source, f"{path.name} contains {forbidden}"
+
+
+# --- admin token and the Sources page ----------------------------------------------------
+
+ALL_JS = JS_DIR_FILES + [STATIC_DIR / "app.js"]
+# The only files allowed to name the admin header: api.js sends it, admin-token.js owns the token.
+ADMIN_HEADER_FILES = {"api.js", "admin-token.js"}
+# The only files allowed to use sessionStorage: the token and the last rescan result.
+SESSION_STORAGE_FILES = {"admin-token.js", "rescan.js"}
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
+def test_scripts_never_use_local_storage_or_console_log(path) -> None:
+    source = path.read_text(encoding="utf-8")
+
+    assert "localStorage" not in source
+    assert "console.log" not in source
+    assert "document.cookie" not in source
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
+def test_only_api_and_token_modules_name_the_admin_header(path) -> None:
+    if path.name not in ADMIN_HEADER_FILES:
+        assert "X-Admin-Token" not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
+def test_only_token_and_rescan_modules_use_session_storage(path) -> None:
+    if path.name not in SESSION_STORAGE_FILES:
+        assert "sessionStorage" not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
+def test_scripts_never_use_the_browser_confirm_box(path) -> None:
+    source = path.read_text(encoding="utf-8")
+
+    assert "window.confirm" not in source
+    assert "confirm(" not in source
+
+
+def test_rescan_has_its_own_long_timeout() -> None:
+    rescan = STATIC_DIR / "js" / "pages" / "rescan.js"
+
+    assert js_constant(rescan, "RESCAN_TIMEOUT_MS") == 180000
+    assert "timeoutMs: RESCAN_TIMEOUT_MS" in rescan.read_text(encoding="utf-8")
+
+
+def test_sources_route_shows_the_sources_page() -> None:
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "sources: { title: \"Sources\", render: renderSourcesPage }" in app_js
+
+
+def test_delete_always_asks_first() -> None:
+    source_list = (STATIC_DIR / "js" / "pages" / "source-list.js").read_text(encoding="utf-8")
+
+    assert source_list.count('method: "DELETE"') == 1
+    assert "permanently deletes all of its articles" in source_list
+    # The only path to deleteSource() goes through the confirmation dialog.
+    assert len(re.findall(r"(?<!function )deleteSource\(", source_list)) == 1
+    assert "if (confirmed) await deleteSource(view, source);" in source_list

@@ -52,3 +52,15 @@ export function formatPercent(value) {
   if (!Number.isFinite(value)) return "–";
   return `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%`;
 }
+
+/** "just now", "5 min ago", "3 h ago" or "2 d ago"; null for a missing or invalid time. */
+export function formatRelativeTime(value, now = Date.now()) {
+  const date = parseApiDate(value);
+  if (!date) return null;
+  const minutes = Math.floor(Math.max(0, now - date.getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}

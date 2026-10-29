@@ -2,8 +2,8 @@
 // focus returns to the element that opened it, and the page behind does not scroll.
 
 import { el } from "./dom.js";
+import { keepFocusInside } from "./focus-trap.js";
 
-const FOCUSABLE = 'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])';
 const BODY_LOCK_CLASS = "drawer-open";
 
 let current = null; // the open drawer, if any
@@ -68,18 +68,3 @@ function handleKey(event, panel) {
   }
 }
 
-// Tab from the last element goes to the first one, Shift+Tab from the first to the last.
-function keepFocusInside(event, panel) {
-  const items = [...panel.querySelectorAll(FOCUSABLE)].filter((node) => node.offsetParent !== null);
-  if (items.length === 0) return;
-  const first = items[0];
-  const last = items[items.length - 1];
-  const inside = panel.contains(document.activeElement);
-  if (event.shiftKey && (document.activeElement === first || !inside)) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && (document.activeElement === last || !inside)) {
-    event.preventDefault();
-    first.focus();
-  }
-}

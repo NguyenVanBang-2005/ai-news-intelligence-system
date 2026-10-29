@@ -113,6 +113,16 @@ app/static/
   js/pages/search-results.js  danh sách kết quả (POST /api/v1/ai/search)
   js/pages/trending-ui.js     chip "Trending:" và sidebar "Trending topics"
   js/pages/article-drawer.js  drawer chi tiết bài (GET /api/v1/articles/{id})
+  js/focus-trap.js            giữ focus Tab trong drawer/hộp thoại
+  js/admin-token.js           token admin của tab (sessionStorage) + adminRequest()
+  js/confirm-dialog.js        hộp thoại xác nhận tự dựng (role="alertdialog")
+  js/pages/sources.js         trang Sources: ghép các phần dưới
+  js/pages/admin-access.js    khối "Admin access": nhập, dùng, xóa token
+  js/pages/rescan.js          nút "Rescan sources", 4 thẻ số liệu, kết quả lần chạy cuối
+  js/pages/source-form.js     form thêm nguồn RSS/Atom
+  js/pages/source-list.js     bảng "Source list": trạng thái, bật/tắt, xóa
+  js/pages/source-status.js   tên ngôn ngữ và trạng thái đồng bộ (tính ở client)
+  js/pages/classified-list.js "Latest classified articles" + lọc theo topic
 ```
 
 ### Trang Search: nguồn dữ liệu từng phần
@@ -137,8 +147,46 @@ Các quyết định:
   xoay vòng trong drawer, Esc hoặc bấm nền mờ để đóng, focus trả về nút đã mở; nền bị khóa cuộn
   bằng class `drawer-open` trên `<body>`; `prefers-reduced-motion` tắt hiệu ứng trượt.
 
+### Trang Sources (`#/sources`)
+
+| Phần | Dữ liệu | Ghi chú |
+|---|---|---|
+| Khối "Admin access" | (không gọi API) | Ô password, "Use token", "Clear token"; trạng thái "No token: read-only" / "Token set (not verified yet)" / "Token verified" |
+| Nút "Rescan sources" + 4 thẻ | `POST /api/v1/ingestion/run` (admin) | Thẻ hiện "–" đến lần Rescan đầu; tỉ lệ trùng = `duplicates_skipped / articles_seen` (ẩn khi bằng 0) |
+| Form "Add an RSS/Atom source" | `POST /api/v1/sources` (admin, `type: "rss"`) | Kiểm tên 2-120 ký tự và URL `http(s)://` trước khi gửi; 409/422 có thông báo riêng |
+| Bảng "Source list" | `GET /api/v1/sources` (public) | Trạng thái Stable/Warning/Error/Inactive/Not synced yet tính từ `is_active`, `last_status`, `last_error`, `last_synced_at`; URL feed là chữ thường, không phải link |
+| Công tắc Active | `PATCH /api/v1/sources/{id}` (admin) | Không cập nhật lạc quan: chỉ đổi theo `SourceRead` server trả về |
+| Nút Delete | `DELETE /api/v1/sources/{id}` (admin) | Luôn qua hộp thoại xác nhận, focus mặc định ở Cancel |
+| "Latest classified articles" | `GET /api/v1/articles?status=ai_analyzed&limit=10[&topic=...]`, `GET /api/v1/ai/topics` | Pill "All" + tối đa 8 topic lớn nhất; bấm dòng mở drawer chi tiết bài |
+
+**Token admin** (chỉ dùng trên máy local tin cậy):
+- Token được giữ trong `sessionStorage` của tab (nếu trình duyệt chặn thì giữ trong bộ nhớ): mất
+  khi đóng tab, không lưu `localStorage`, cookie hay URL, không ghi ra console, không đặt vào
+  thuộc tính DOM. Chỉ `js/admin-token.js` đọc/ghi token; `api.js` nhận token qua tham số.
+- Token chỉ được gửi trong header của request admin. Request công khai (`GET /sources`,
+  `/articles`, `/ai/topics`) không kèm token. Chưa có token thì mọi nút ghi bị khóa và không có
+  request admin nào được gửi.
+- Không có endpoint kiểm tra token, nên trạng thái "Token verified" chỉ có sau một lệnh admin
+  thành công. 401 → "The admin token was rejected. Enter it again." và mở lại ô nhập;
+  503 → "The server has no admin token configured."
+- Ai mở được tab đó (hoặc chạy được script trong trang) đều đọc được token: đừng dùng trên máy
+  dùng chung hay khi trang có thể bị nhúng mã lạ.
+
+**Giới hạn đã biết**:
+- 4 thẻ số liệu chỉ có sau khi bấm Rescan (server không lưu lịch sử chạy). Kết quả lần cuối được
+  giữ trong `sessionStorage` của tab cùng thời điểm chạy.
+- **Xóa nguồn xóa luôn toàn bộ bài của nguồn đó** (cascade), không hoàn tác được.
+- Rescan chạy đồng bộ, có thể mất vài phút (timeout phía trình duyệt 180 s,
+  `RESCAN_TIMEOUT_MS`). Hết thời gian chờ không có nghĩa là thất bại: server có thể vẫn đang chạy.
+- Hai lần Rescan cùng lúc (hai tab, hai người) không bị khóa và có thể ghi đè trạng thái đồng bộ
+  của nhau.
+- "Latest classified articles" sắp theo ngày xuất bản (`published_at`), không theo thời điểm
+  phân loại.
+- Nguồn mới chỉ được kiểm tra feed ở lần Rescan sau ("The feed is checked the next time sources
+  are rescanned."); form chỉ thêm nguồn RSS/Atom.
+
 - **Hash route**: `#/search` (mặc định), `#/topics`, `#/sources`. Hash lạ quay về Search. Topics
-  và Sources hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.
+  hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.
 - **CSP** (`app/core/security_headers.py`, chỉ trên `/` và `/static/...`):
   `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';
   connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'`.
@@ -148,7 +196,8 @@ Các quyết định:
   `js/dom.js`). Không dùng `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
   `eval` (có test grep). Link bài báo đi qua `safeHref()` (chỉ nhận `http://`, `https://`, ngược
   lại hiện chữ thường) và luôn có `target="_blank" rel="noopener noreferrer"`.
-- **Token admin**: trang Search không có ô nhập token; `api.js` nhận token qua tham số, không lưu.
+- **Token admin**: chỉ trang Sources có ô nhập token (xem trên); `api.js` nhận token qua tham số,
+  không lưu.
 - **Timeout**: request thường chờ 20 s (`DEFAULT_TIMEOUT_MS`), search chờ 60 s
   (`SEARCH_TIMEOUT_MS`), vì lần search đầu có thể phải chờ nạp model (xem "Nạp sẵn model").
   Sau 5 s chưa có kết quả, trang hiện thêm dòng giải thích.

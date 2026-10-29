@@ -3,12 +3,13 @@
 import { comingSoon } from "./js/components.js";
 import { closeDrawer } from "./js/drawer.js";
 import { renderSearchPage } from "./js/pages/search.js";
+import { renderSourcesPage } from "./js/pages/sources.js";
 import { startRouter } from "./js/router.js";
 
 const routes = {
   search: { title: "Search", render: renderSearchPage },
   topics: { title: "Topics", render: (root) => root.append(comingSoon("Topics")) },
-  sources: { title: "Sources", render: (root) => root.append(comingSoon("Sources")) },
+  sources: { title: "Sources", render: renderSourcesPage },
 };
 
 // A drawer belongs to the page it was opened on.
