@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,14 +10,25 @@ from app.api.router import api_router
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.services import model_preload
 
 STATIC_DIR = Path(__file__).parent / "static"
 SEARCH_PAGE = STATIC_DIR / "index.html"
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """With AI_PRELOAD_MODEL, start loading the search model without delaying startup."""
+    if settings.ai_preload_model:
+        model_preload.embedding_model.start_background_load()
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="Backend MVP for collecting and analyzing AI news.",
+    lifespan=lifespan,
 )
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 # Files of app/static only; html=False, so no index pages and no directory listing.

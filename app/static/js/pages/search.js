@@ -1,6 +1,6 @@
 // The Search page: POST /api/v1/ai/search and a list of matching stored articles.
 
-import { request } from "../api.js";
+import { request, SEARCH_TIMEOUT_MS } from "../api.js";
 import { badge, card, emptyState, errorBanner, infoBanner, loading } from "../components.js";
 import { el, externalLink } from "../dom.js";
 import { formatDateTime, formatPercent } from "../format.js";
@@ -8,6 +8,8 @@ import { formatDateTime, formatPercent } from "../format.js";
 const SEARCH_PATH = "/api/v1/ai/search";
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 500;
+const SLOW_HINT_DELAY_MS = 5000;
+const SLOW_HINT = "The first search can take up to a minute while the model loads.";
 
 const SUMMARY_LABELS = {
   ai: ["AI summary", "primary"],
@@ -19,7 +21,7 @@ export function renderSearchPage(root) {
   const view = {
     input: el("input", {
       className: "search-input", type: "search", name: "input", autocomplete: "off",
-      maxlength: MAX_QUERY_LENGTH, placeholder: "For example: EU AI Act, OpenAI, robotics…",
+      maxlength: MAX_QUERY_LENGTH, placeholder: "Search AI news…",
       "aria-label": "Search the collected news",
     }),
     button: el("button", { className: "btn btn-primary", type: "submit", text: "Search" }),
@@ -52,16 +54,30 @@ async function runSearch(view) {
     return;
   }
   setBusy(view, true);
-  showInResults(view, loading("Searching…"));
+  const stopSlowHint = showLoadingWithSlowHint(view);
   try {
-    const data = await request(SEARCH_PATH, { method: "POST", body: { input: query } });
+    const data = await request(SEARCH_PATH, {
+      method: "POST", body: { input: query }, timeoutMs: SEARCH_TIMEOUT_MS,
+    });
     view.results.replaceChildren(resultsPanel(query, data.sources ?? []));
   } catch (error) {
     if (!error?.kind) console.error(error); // a bug, not an API answer
     showInResults(view, errorBanner(error));
   } finally {
+    stopSlowHint();
     setBusy(view, false);
   }
+}
+
+// Shows "Searching…", plus SLOW_HINT if the answer takes longer than SLOW_HINT_DELAY_MS.
+// Results or an error replace the whole loading card, hint included.
+function showLoadingWithSlowHint(view) {
+  const box = el("div", { className: "loading-box" }, loading("Searching…"));
+  showInResults(view, box);
+  const timer = setTimeout(() => {
+    box.append(el("p", { className: "state state-hint", text: SLOW_HINT }));
+  }, SLOW_HINT_DELAY_MS);
+  return () => clearTimeout(timer);
 }
 
 function setBusy(view, busy) {

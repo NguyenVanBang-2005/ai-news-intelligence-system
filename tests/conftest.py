@@ -35,6 +35,14 @@ def admin_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_model_preload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AI_PRELOAD_MODEL=true in a local .env must not load the real model in every test."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ai_preload_model", False)
+
+
+@pytest.fixture(autouse=True)
 def fresh_search_rate_limit() -> Generator[None, None, None]:
     """The search rate limiter is process-wide; no test may inherit another's hits."""
     from app.api.deps import search_rate_limiter

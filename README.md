@@ -122,6 +122,13 @@ app/static/
   `eval` (có test grep). Link bài báo đi qua `safeHref()` (chỉ nhận `http://`, `https://`, ngược
   lại hiện chữ thường) và luôn có `target="_blank" rel="noopener noreferrer"`.
 - **Token admin**: trang Search không có ô nhập token; `api.js` nhận token qua tham số, không lưu.
+- **Timeout**: request thường chờ 20 s (`DEFAULT_TIMEOUT_MS`), search chờ 60 s
+  (`SEARCH_TIMEOUT_MS`), vì lần search đầu có thể phải chờ nạp model (xem "Nạp sẵn model").
+  Sau 5 s chưa có kết quả, trang hiện thêm dòng giải thích.
+- **Favicon**: `<link rel="icon" href="data:,">` (biểu tượng rỗng) để trình duyệt không gọi
+  `/favicon.ico`; favicon thật chưa làm.
+- **`/docs` cần Internet**: Swagger UI và ReDoc được tải từ CDN (jsdelivr). Trang web chính
+  không cần CDN.
 - Thời gian từ API không có hậu tố múi giờ được coi là UTC, hiển thị theo giờ Việt Nam; thiếu
   hoặc sai thì hiện "Date unknown".
 
@@ -301,6 +308,27 @@ DLL native của `hdbscan`; trong Docker module này chạy được. Lần ch�
 Trang `/` gọi `POST /api/v1/ai/search` (public, không cần token): chỉ tìm trong bài đã lưu,
 giới hạn 30 request/phút mỗi địa chỉ (`AI_SEARCH_RATE_PER_MINUTE`, vượt thì 429 kèm
 `Retry-After`), body tối đa 4096 byte (`AI_SEARCH_MAX_BODY_BYTES`), không nhận link (422).
+
+### Nạp sẵn model (`AI_PRELOAD_MODEL`)
+
+- Mặc định trong code là `false`; `.env.example` đặt `true`. Khi bật, lúc khởi động server
+  mở một thread nền để import code search (torch, sentence-transformers) rồi nạp model
+  embedding. Server **không chờ** việc này để nhận request, và nạp lỗi chỉ ghi log, không
+  làm server dừng; khi đó search vẫn trả 503 như cũ và lần search sau sẽ thử nạp lại.
+- Model chỉ được nạp một lần (`app/services/model_preload.py`). Request đến trong lúc đang
+  nạp sẽ chờ lần nạp đó, kể cả khi hai request đầu đến cùng lúc.
+- `GET /api/v1/health` có thêm `model_ready` (true/false). Trường này chỉ để thông tin:
+  health vẫn trả 200 `"status": "ok"` khi model chưa sẵn sàng.
+- **Giới hạn khi không bật preload:** lần search đầu sau khi khởi động phải chờ import và nạp
+  model. Đo trên máy dev (Windows 11, 16 CPU, Python 3.14, model
+  `paraphrase-multilingual-MiniLM-L12-v2` có sẵn trong cache, `HF_HUB_OFFLINE=1`), 3 lần
+  khởi động lại: lần đầu 28.0–28.3 s (import khoảng 25.8 s, nạp model khoảng 2.3 s), lần
+  sau 0.02–0.03 s, RAM tiến trình khoảng 1.25 GB sau khi nạp. Trang web chờ search tối đa
+  60 s và sau 5 s hiện dòng "The first search can take up to a minute while the model loads."
+- **Mạng:** model lấy từ cache Hugging Face (`~/.cache/huggingface`). Docker image không có
+  sẵn model, nên container tải ở lần chạy đầu. Máy không có mạng nên đặt `HF_HUB_OFFLINE=1`
+  khi model đã có trong cache. Không đặt thì thư viện thử kết nối lại nhiều lần, và trong
+  lần đo, lần nạp vẫn chưa xong sau hơn 2 phút. Model không có trong cache thì search trả 503.
 
 `POST /api/v1/ai/ask` với `{"input": "..."}` cần `X-Admin-Token`; nhận yêu cầu hoặc link bài báo.
 `ASK_ALLOW_LINKS` và `INGESTION_FULL_TEXT` mặc định `true` trong code nhưng `false` trong

@@ -123,9 +123,11 @@ a { color: var(--color-primary); }
 
 /* ===== Page ===== */
 
-.app { flex: 1; outline: none; }
+/* Column that fills the space between header and footer, so the footer sits at the bottom. */
+.app { flex: 1; display: flex; flex-direction: column; outline: none; }
 
 .container {
+  width: 100%; /* .app is a flex column: without this, auto margins shrink it to its content */
   max-width: var(--content-width);
   margin: 0 auto;
   padding: var(--space-6) var(--space-8) var(--space-12);
@@ -147,13 +149,28 @@ a { color: var(--color-primary); }
 /* ===== Hero ===== */
 
 .hero {
-  padding: var(--space-12) var(--space-8) calc(var(--space-12) + var(--space-6));
+  padding: var(--space-8) var(--space-8) calc(var(--space-12) + var(--space-6));
   text-align: center;
   color: var(--color-hero-text);
   background:
     radial-gradient(ellipse 60% 80% at 70% 0%, var(--color-hero-glow), transparent 70%),
     linear-gradient(180deg, var(--color-hero-from), var(--color-hero-to));
 }
+
+/* Before the first search there is nothing below the hero: the hero takes the free height
+   (content centered) instead of leaving an empty grey area above the footer. */
+.app:has(.results:empty) > .hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: var(--space-8);
+}
+
+/* In a flex column, auto side margins would shrink children to their content width. */
+.app:has(.results:empty) > .hero > * { width: 100%; }
+
+.app:has(.results:empty) > .container { display: none; }
 
 .hero-title {
   max-width: 760px;
@@ -242,6 +259,7 @@ a { color: var(--color-primary); }
 .state-loading { font-size: var(--font-size-sm); }
 .state-empty { text-align: center; padding: var(--space-8) var(--space-4); }
 .state-empty-title { margin: 0 0 var(--space-1); font-weight: 600; color: var(--color-text); }
+.state-hint { margin-top: var(--space-2); font-size: var(--font-size-sm); }
 
 .banner {
   padding: var(--space-3) var(--space-4);
@@ -309,7 +327,7 @@ a { color: var(--color-primary); }
   .topbar { padding: var(--space-3) var(--space-4); }
   .nav { width: 100%; gap: var(--space-1) var(--space-4); }
   .container { padding: var(--space-4) var(--space-4) var(--space-8); }
-  .hero { padding: var(--space-8) var(--space-4) calc(var(--space-12) + var(--space-4)); }
+  .hero { padding: var(--space-6) var(--space-4) calc(var(--space-12) + var(--space-4)); }
   .footer { padding: var(--space-4); }
   .result-card { padding: var(--space-4); }
 }

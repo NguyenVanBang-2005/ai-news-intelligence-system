@@ -192,6 +192,29 @@ def test_index_has_no_inline_style_or_handlers() -> None:
     assert "onclick=" not in INDEX_HTML.lower()
 
 
+def test_index_has_an_empty_data_icon() -> None:
+    # Stops the browser from requesting /favicon.ico (a 404 in the console).
+    icons = [attrs for tag, attrs in parse_index().tags
+             if tag == "link" and attrs.get("rel") == "icon"]
+
+    assert icons == [{"rel": "icon", "href": "data:,"}]
+
+
+def js_constant(path, name: str) -> int:
+    match = re.search(rf"export const {name} = (\d+);", path.read_text(encoding="utf-8"))
+    assert match, f"{name} not found in {path.name}"
+    return int(match.group(1))
+
+
+def test_search_timeout_is_longer_than_the_default() -> None:
+    api = STATIC_DIR / "js" / "api.js"
+    search_page = (STATIC_DIR / "js" / "pages" / "search.js").read_text(encoding="utf-8")
+
+    assert js_constant(api, "SEARCH_TIMEOUT_MS") > js_constant(api, "DEFAULT_TIMEOUT_MS")
+    assert js_constant(api, "SEARCH_TIMEOUT_MS") >= 60000
+    assert "timeoutMs: SEARCH_TIMEOUT_MS" in search_page
+
+
 @pytest.mark.parametrize("path", JS_DIR_FILES + [STATIC_DIR / "app.js"], ids=lambda p: p.name)
 def test_scripts_never_write_html_or_eval(path) -> None:
     source = path.read_text(encoding="utf-8")

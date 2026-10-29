@@ -1,6 +1,8 @@
 // Calls to the AINIS API on the same origin, with errors sorted into a few kinds.
 
-const DEFAULT_TIMEOUT_MS = 20000;
+export const DEFAULT_TIMEOUT_MS = 20000;
+// The first search after a server start may wait for the embedding model to load.
+export const SEARCH_TIMEOUT_MS = 60000;
 
 const KIND_BY_STATUS = {
   401: "unauthorized",
