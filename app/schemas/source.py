@@ -59,3 +59,8 @@ class SourceRead(BaseModel):
     language: str
     is_active: bool
     created_at: datetime
+    # Latest sync; all null until the source is first ingested. last_status is "ok",
+    # "warning" (no articles seen) or "error"; last_error is a short fixed message only.
+    last_synced_at: datetime | None
+    last_status: Literal["ok", "warning", "error"] | None
+    last_error: str | None

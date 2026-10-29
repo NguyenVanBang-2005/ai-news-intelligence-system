@@ -79,7 +79,7 @@ Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
 | Method | Path | Auth | Ghi chú |
 |---|---|---|---|
 | GET | `/health` | public | `{"status": "ok"}` |
-| GET | `/sources` | public | `SourceRead`: `id`, `name`, `type`, `feed_url`, `query`, `language`, `is_active`, `created_at` |
+| GET | `/sources` | public | `SourceRead`: `id`, `name`, `type`, `feed_url`, `query`, `language`, `is_active`, `created_at`, `last_synced_at`, `last_status`, `last_error` (xem "Trạng thái đồng bộ") |
 | POST | `/sources` | admin | `SourceCreate`; 201, 409 nếu trùng tên hoặc `feed_url` |
 | PATCH | `/sources/{source_id}` | admin | Body `{"is_active": bool}`; trả `SourceRead`, 404 nếu không có. Nguồn tắt bị ingestion bỏ qua |
 | DELETE | `/sources/{source_id}` | admin | 204; xóa luôn mọi bài của nguồn (cascade) |
@@ -114,6 +114,25 @@ Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
 
 `POST /api/v1/ingestion/run?source_id=ID` thu thập bài mới từ source đã lưu; bỏ `source_id`
 sẽ chạy mọi nguồn active. Endpoint không nhận URL qua request body.
+
+#### Trạng thái đồng bộ
+
+Sau mỗi nguồn được chạy, ingestion ghi và commit ba cột của nguồn đó (migration
+`0007_source_sync_status`). Nguồn chưa từng chạy: cả ba là `null`. Nguồn tắt (`is_active=false`)
+không bị đọc feed và không bị cập nhật; chạy với `source_id` chỉ cập nhật nguồn đó.
+
+- `last_synced_at`: thời điểm (UTC) xử lý xong nguồn trong lần chạy gần nhất.
+- `last_status`:
+  - `error`: lần chạy gặp lỗi (tải hoặc parse feed thất bại, lỗi News API, lỗi lưu bài).
+  - `warning`: không lỗi nhưng feed không có bài nào (`articles_seen` của riêng nguồn = 0).
+  - `ok`: các trường hợp còn lại, kể cả khi mọi bài đều đã có (chỉ trùng).
+- `last_error`: chỉ có khi `error`. Là **thông điệp rút gọn** dạng `<LoạiLỗi>: <thông điệp cố định>`,
+  ví dụ `UnsupportedFeedError: Link returns HTML or another document, not RSS/Atom`,
+  `ReadTimeout: Request timed out`, `UnsafeFeedUrlError: Blocked non-public or unresolvable address`.
+  Không bao giờ chứa URL, hostname, IP, text gốc của exception hay stack trace, vì
+  `GET /sources` là public; tối đa 300 ký tự. Bảng ánh xạ ở `app/services/sync_errors.py`; loại lỗi
+  lạ ghi `Unexpected error`. Chi tiết đầy đủ vẫn có trong `errors` của response
+  `POST /ingestion/run` (admin).
 
 - `type: "rss"` (mặc định): đọc `feed_url`. `HttpUrl` chỉ kiểm tra cú pháp khi tạo source,
   không xác nhận nội dung là feed; trang HTML và URL bài viết đơn lẻ không được hỗ trợ.
