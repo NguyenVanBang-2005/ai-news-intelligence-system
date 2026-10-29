@@ -1,21 +1,18 @@
-// The Search page: POST /api/v1/ai/search and a list of matching stored articles.
+// The Search page: hero with search box and trending chips, then results and a
+// "Trending topics" sidebar once a search has been made.
 
 import { request, SEARCH_TIMEOUT_MS } from "../api.js";
-import { badge, card, emptyState, errorBanner, infoBanner, loading } from "../components.js";
-import { el, externalLink } from "../dom.js";
-import { formatDateTime, formatPercent } from "../format.js";
+import { card, errorBanner, infoBanner, loading } from "../components.js";
+import { el } from "../dom.js";
+import { fetchTrending } from "../trending.js";
+import { resultsPanel } from "./search-results.js";
+import { trendingChips, trendingSidebar } from "./trending-ui.js";
 
 const SEARCH_PATH = "/api/v1/ai/search";
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 500;
 const SLOW_HINT_DELAY_MS = 5000;
 const SLOW_HINT = "The first search can take up to a minute while the model loads.";
-
-const SUMMARY_LABELS = {
-  ai: ["AI summary", "primary"],
-  cached: ["Cached summary", "success"],
-  extractive: ["Extractive summary", "warning"],
-};
 
 export function renderSearchPage(root) {
   const view = {
@@ -32,16 +29,23 @@ export function renderSearchPage(root) {
     className: "search-box", role: "search", novalidate: true,
     onsubmit: (event) => { event.preventDefault(); runSearch(view); },
   }, [view.input, view.button]);
+  const trending = fetchTrending(); // one shared request for chips and sidebar
+  const searchFor = (topic) => { view.input.value = topic; runSearch(view); };
+  view.layout = el("div", { className: "search-layout" }, [
+    view.results, trendingSidebar(trending, searchFor),
+  ]);
 
-  root.append(hero(form), el("div", { className: "container" }, view.results));
+  root.append(hero(form, trendingChips(trending, searchFor)),
+    el("div", { className: "container" }, view.layout));
   view.input.focus();
 }
 
-function hero(form) {
+function hero(form, chips) {
   return el("section", { className: "hero" }, [
     el("h1", { className: "hero-title", text: "Find AI news in the articles we have collected" }),
     el("p", { className: "hero-subtitle", text: "Search by topic or question. Results come only from stored articles." }),
     form,
+    chips,
     el("p", { className: "hero-hint", text: "Links are not accepted here: type words, not an article URL." }),
   ]);
 }
@@ -66,6 +70,7 @@ async function runSearch(view) {
   } finally {
     stopSlowHint();
     setBusy(view, false);
+    view.layout.classList.add("has-searched"); // shows the sidebar from now on
   }
 }
 
@@ -89,36 +94,4 @@ function setBusy(view, busy) {
 
 function showInResults(view, node) {
   view.results.replaceChildren(card(node));
-}
-
-function resultsPanel(query, sources) {
-  if (sources.length === 0) {
-    return card(emptyState(`No articles found for "${query}".`, "Try other words or a broader topic."));
-  }
-  const count = `${sources.length} matching article${sources.length === 1 ? "" : "s"}`;
-  return el("div", { className: "results-panel" }, [
-    card(el("div", { className: "results-header" }, [
-      el("h2", { className: "results-title", text: "Related articles" }),
-      el("p", { className: "results-count", text: count }),
-    ])),
-    el("ol", { className: "result-list" }, sources.map(resultCard)),
-  ]);
-}
-
-function resultCard(source, index) {
-  const [summaryLabel, summaryTone] = SUMMARY_LABELS[source.summary_method] ?? ["Summary", "neutral"];
-  return el("li", { className: "card result-card" }, [
-    el("div", { className: "result-top" }, [
-      el("span", { className: "result-index", text: String(index + 1).padStart(2, "0") }),
-      source.topic ? badge(source.topic, "primary") : null,
-      el("time", { datetime: source.published_at, text: formatDateTime(source.published_at) }),
-    ]),
-    el("h3", { className: "result-title" }, externalLink(source.url, source.title)),
-    el("p", { className: "result-summary", text: source.summary }),
-    el("div", { className: "result-meta" }, [
-      el("span", { className: "result-source", text: source.source_name }),
-      badge(summaryLabel, summaryTone),
-      el("span", { title: "Similarity to your search", text: `Match ${formatPercent(source.similarity)}` }),
-    ]),
-  ]);
 }

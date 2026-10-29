@@ -107,8 +107,35 @@ app/static/
   js/format.js      ngày giờ (Asia/Ho_Chi_Minh), số, điểm "+2.1σ", phần trăm
   js/router.js      hash router
   js/components.js  loading, empty state, banner lỗi, badge, thẻ, "Coming soon"
-  js/pages/search.js  trang Search: POST /api/v1/ai/search
+  js/trending.js    fetchTrending(): GET /topics/trending, cache trong bộ nhớ 60 s
+  js/drawer.js      panel trượt (dialog): focus, Tab xoay vòng, Esc, khóa cuộn nền
+  js/pages/search.js          trang Search: ô tìm, chip trending, bố cục kết quả + sidebar
+  js/pages/search-results.js  danh sách kết quả (POST /api/v1/ai/search)
+  js/pages/trending-ui.js     chip "Trending:" và sidebar "Trending topics"
+  js/pages/article-drawer.js  drawer chi tiết bài (GET /api/v1/articles/{id})
 ```
+
+### Trang Search: nguồn dữ liệu từng phần
+
+| Phần | Dữ liệu | Ghi chú |
+|---|---|---|
+| Ô tìm + danh sách kết quả | `POST /api/v1/ai/search` | Tiêu đề và mũi tên mở drawer, không mở thẳng trang gốc |
+| Chip "Trending:" ở hero | `GET /api/v1/topics/trending?window_hours=24&baseline_days=7&min_articles=2&limit=10` | Tối đa 4 topic điểm cao nhất; danh sách rỗng hoặc lỗi thì ẩn cả hàng chip |
+| Sidebar "Trending topics" | Cùng request với chip (một request mỗi lần mở trang, cache 60 s) | Chỉ hiện sau lần tìm đầu; lỗi thì hiện "Trending is unavailable right now." |
+| Drawer chi tiết bài | `GET /api/v1/articles/{id}` | Gọi mỗi lần mở; 404 hiện "This article is no longer available."; lỗi khác có nút Retry |
+
+Các quyết định:
+- **Điểm trending là xấp xỉ** (`trend_score`, số độ lệch chuẩn so với mức thường). Nhãn "24h" và
+  chú thích "24 hours / 7 days" lấy từ chính tham số đã gửi (`TRENDING_PARAMS` trong
+  `js/trending.js`). Thanh tiến độ tỉ lệ với điểm cao nhất trong danh sách.
+- Bấm chip hoặc một dòng sidebar: điền topic vào ô tìm và tìm luôn.
+- **Drawer không có deep-link**: mở hoặc đóng drawer không đổi URL/hash, và đổi route sẽ đóng
+  drawer. Drawer đọc mọi trường từ `GET /articles/{id}`, không dùng lại dữ liệu của kết quả
+  search. Nội dung dài hơn 4000 ký tự có nút "Show full text" (không gọi API thêm). Nút "Open
+  original article" chỉ hiện khi URL là `http(s)://`.
+- Truy cập: drawer có `role="dialog"`, `aria-modal`, focus vào nút đóng khi mở, Tab/Shift+Tab
+  xoay vòng trong drawer, Esc hoặc bấm nền mờ để đóng, focus trả về nút đã mở; nền bị khóa cuộn
+  bằng class `drawer-open` trên `<body>`; `prefers-reduced-motion` tắt hiệu ứng trượt.
 
 - **Hash route**: `#/search` (mặc định), `#/topics`, `#/sources`. Hash lạ quay về Search. Topics
   và Sources hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.

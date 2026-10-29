@@ -116,7 +116,9 @@ def test_every_script_is_served_as_javascript(web: TestClient, path) -> None:
 def test_the_expected_modules_exist() -> None:
     names = {p.relative_to(STATIC_DIR).as_posix() for p in JS_FILES}
     assert {"app.js", "js/api.js", "js/dom.js", "js/format.js", "js/router.js",
-            "js/components.js", "js/pages/search.js"} <= names
+            "js/components.js", "js/pages/search.js", "js/trending.js", "js/drawer.js",
+            "js/pages/search-results.js", "js/pages/trending-ui.js",
+            "js/pages/article-drawer.js"} <= names
 
 
 def test_every_static_reference_in_index_exists() -> None:
