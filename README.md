@@ -64,13 +64,31 @@ với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal ch�
 ## Token quản trị
 
 `POST /api/v1/sources`, `PATCH`/`DELETE /api/v1/sources/{source_id}`,
-`POST /api/v1/ingestion/run`, `POST /api/v1/ai/process` và
+`POST /api/v1/ingestion/run`, `POST /api/v1/ai/process`, `GET /api/v1/ai/process/{job_id}` và
 `POST /api/v1/ai/ask` cần header `X-Admin-Token` khớp `ADMIN_API_TOKEN`. Chưa đặt
 `ADMIN_API_TOKEN` thì các endpoint này trả 503; thiếu hoặc sai token thì trả 401. Tạo token:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+## Bảo mật HTTP
+
+- Mọi response (API, `/`, `/static/...`, `/docs`, lỗi 404/413) có các header
+  (`app/core/security_headers.py`):
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Permissions-Policy: camera=(), microphone=(), geolocation=()`. Response 500 do
+  `ServerErrorMiddleware` của Starlette tạo nằm ngoài middleware này nên có thể thiếu header.
+- **Chưa có Content-Security-Policy**: `app/static/index.html` còn dùng script/style inline. CSP
+  sẽ được thêm cùng front-end sau khi tách file; `/docs` và `/redoc` tải Swagger UI/ReDoc từ
+  CDN nên không áp nguyên CSP đó lên chúng.
+- **Không có CORS**: không cài `CORSMiddleware`, trình duyệt chỉ gọi API từ cùng origin. UI chạy
+  chung server nên không cần.
+- File tĩnh: `/static/<file>` phục vụ đúng thư mục `app/static` (không liệt kê thư mục, không
+  tự trả `index.html`, path traversal trả 404). `GET /` vẫn trả `index.html`. UI nhiều trang dùng
+  hash route (`#/search`, `#/topics`, `#/sources`), server không có route trang riêng.
+- Endpoint admin (cần `X-Admin-Token`): `POST /sources`, `PATCH`/`DELETE /sources/{source_id}`,
+  `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask`.
 
 ## Danh sách endpoint
 
@@ -92,7 +110,7 @@ Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
 | POST | `/ai/search` | public, rate limit | Body `{"input": "..."}`; `sources[]`: `id`, `title`, `url`, `source_name`, `topic`, `published_at`, `similarity`, `summary`, `summary_method` |
 | POST | `/ai/ask` | admin | Như `/ai/search` nhưng nhận link, gọi LLM và trả thêm `answer` |
 | POST | `/ai/process` | admin | 202 kèm job `id` |
-| GET | `/ai/process/{job_id}` | public | Trạng thái job |
+| GET | `/ai/process/{job_id}` | admin | Trạng thái job (`error` có thể chứa chi tiết nội bộ nên không public) |
 
 ## Luồng thử nhanh
 
@@ -231,7 +249,7 @@ DLL native của `hdbscan`; trong Docker module này chạy được. Lần ch�
 
 - `POST /api/v1/ai/process` xếp một job chạy nền và trả `202` kèm `id` ngay. `409` nếu
   chưa đủ bài (`AI_MIN_DOCUMENTS`) hoặc đang có job khác chạy; `503` nếu không nạp được thư viện ML.
-- `GET /api/v1/ai/process/{job_id}` trả `status` (`pending` → `running` → `succeeded` | `failed`),
+- `GET /api/v1/ai/process/{job_id}` (cần `X-Admin-Token`) trả `status` (`pending` → `running` → `succeeded` | `failed`),
   `error` khi thất bại và `result` khi thành công. `result` gồm số liệu batch,
   `confidence_method` (`hdbscan_soft` là điểm thật từ HDBSCAN; `fallback` là giá trị cố định 0.5)
   và `topic_coherence` (NPMI trung bình, -1..1, càng cao càng tốt — so sánh giữa các batch
