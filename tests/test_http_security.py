@@ -59,9 +59,9 @@ def test_body_limit_refusal_also_has_the_headers(web: TestClient) -> None:
     assert_security_headers(response)
 
 
-def test_no_content_security_policy_yet(web: TestClient) -> None:
-    # Added with the front-end; it would block the inline script of index.html today.
-    assert "Content-Security-Policy" not in web.get("/").headers
+def test_api_responses_have_no_content_security_policy(web: TestClient) -> None:
+    # The CSP is for the web UI only (see tests/test_web_ui.py).
+    assert "Content-Security-Policy" not in web.get("/api/v1/health").headers
 
 
 def test_docs_pages_still_load_swagger_and_redoc(web: TestClient) -> None:

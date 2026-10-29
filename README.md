@@ -79,9 +79,9 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
   `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
   `Permissions-Policy: camera=(), microphone=(), geolocation=()`. Response 500 do
   `ServerErrorMiddleware` của Starlette tạo nằm ngoài middleware này nên có thể thiếu header.
-- **Chưa có Content-Security-Policy**: `app/static/index.html` còn dùng script/style inline. CSP
-  sẽ được thêm cùng front-end sau khi tách file; `/docs` và `/redoc` tải Swagger UI/ReDoc từ
-  CDN nên không áp nguyên CSP đó lên chúng.
+- **Content-Security-Policy** chỉ cho giao diện web (`/` và `/static/...`), xem mục
+  "Giao diện web". Không áp cho `/docs`, `/redoc` (tải Swagger UI/ReDoc từ CDN, có script
+  inline), `/openapi.json` và `/api/*`.
 - **Không có CORS**: không cài `CORSMiddleware`, trình duyệt chỉ gọi API từ cùng origin. UI chạy
   chung server nên không cần.
 - File tĩnh: `/static/<file>` phục vụ đúng thư mục `app/static` (không liệt kê thư mục, không
@@ -89,6 +89,41 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
   hash route (`#/search`, `#/topics`, `#/sources`), server không có route trang riêng.
 - Endpoint admin (cần `X-Admin-Token`): `POST /sources`, `PATCH`/`DELETE /sources/{source_id}`,
   `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask`.
+
+## Giao diện web
+
+Mở <http://127.0.0.1:8001/> (Docker Compose, `API_PORT=8001`). Viết bằng HTML/CSS/JavaScript
+thuần: không build step, không CDN, không thư viện ngoài. UI chỉ gọi API cùng origin
+(`fetch("/api/v1/...")`); server không bật CORS nên trang ở origin khác không gọi được API.
+
+```text
+app/static/
+  index.html        shell: header (logo + nav), <main id="app">, footer; không script/style inline
+  style.css         biến CSS (màu, spacing, bo góc, bóng), responsive từ 380px
+  app.js            điểm vào: khai báo route, chạy router
+  img/logo.png      logo 280x58 (đã gồm tagline "AI News Intelligence"; header phải nền #FFFFFF)
+  js/api.js         request(path, {method, body, admin}): fetch cùng origin, timeout, phân loại lỗi
+  js/dom.js         el(), externalLink(), safeHref(): dựng DOM an toàn
+  js/format.js      ngày giờ (Asia/Ho_Chi_Minh), số, điểm "+2.1σ", phần trăm
+  js/router.js      hash router
+  js/components.js  loading, empty state, banner lỗi, badge, thẻ, "Coming soon"
+  js/pages/search.js  trang Search: POST /api/v1/ai/search
+```
+
+- **Hash route**: `#/search` (mặc định), `#/topics`, `#/sources`. Hash lạ quay về Search. Topics
+  và Sources hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.
+- **CSP** (`app/core/security_headers.py`, chỉ trên `/` và `/static/...`):
+  `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';
+  connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'`.
+  Không `'unsafe-inline'`/`'unsafe-eval'`, nên mọi script và style phải nằm trong file. Style động
+  (nếu cần) chỉ đặt bằng `element.style.setProperty`, không `setAttribute("style")`.
+- **Render an toàn**: chữ từ API chỉ vào DOM qua `textContent`/text node (`el()` trong
+  `js/dom.js`). Không dùng `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+  `eval` (có test grep). Link bài báo đi qua `safeHref()` (chỉ nhận `http://`, `https://`, ngược
+  lại hiện chữ thường) và luôn có `target="_blank" rel="noopener noreferrer"`.
+- **Token admin**: trang Search không có ô nhập token; `api.js` nhận token qua tham số, không lưu.
+- Thời gian từ API không có hậu tố múi giờ được coi là UTC, hiển thị theo giờ Việt Nam; thiếu
+  hoặc sai thì hiện "Date unknown".
 
 ## Danh sách endpoint
 

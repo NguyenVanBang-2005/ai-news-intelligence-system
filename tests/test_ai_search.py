@@ -399,5 +399,8 @@ def test_search_page_is_served_and_uses_public_search(anonymous: TestClient) -> 
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "/api/v1/ai/search" in response.text
-    assert "X-Admin-Token" not in response.text
+    # The page's search code lives in a module since the B1 front-end; it sends no token.
+    search_module = anonymous.get("/static/js/pages/search.js").text
+    assert "/api/v1/ai/search" in search_module
+    assert "X-Admin-Token" not in response.text + search_module
+    assert "admin" not in search_module
