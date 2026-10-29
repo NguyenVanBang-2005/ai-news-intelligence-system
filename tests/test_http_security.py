@@ -115,6 +115,35 @@ def test_path_traversal_cannot_read_files_outside_static(web: TestClient, path: 
     assert b"import" not in response.content
 
 
+RAW_CALL_TIMEOUT_SECONDS = 10
+
+
+def make_receive():
+    """An ASGI `receive`: an empty request body first, then an immediate disconnect.
+
+    Answering http.request forever made a response that waits for http.disconnect spin
+    without end (it hung CI). The disconnect is returned at once, without waiting.
+    """
+    calls = 0
+
+    async def receive() -> dict:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.disconnect"}
+
+    return receive
+
+
+async def call_app_with_timeout(scope: dict, send) -> None:
+    """Run the app once; fail clearly after RAW_CALL_TIMEOUT_SECONDS instead of hanging."""
+    try:
+        await asyncio.wait_for(app(scope, make_receive(), send), RAW_CALL_TIMEOUT_SECONDS)
+    except TimeoutError:
+        pytest.fail(f"app did not answer {scope['path']!r} within {RAW_CALL_TIMEOUT_SECONDS}s")
+
+
 def send_raw_path(path: str) -> tuple[int, bytes]:
     """Call the app with `path` exactly as given; HTTP clients would remove "../" first."""
     messages: list[dict] = []
@@ -125,15 +154,23 @@ def send_raw_path(path: str) -> tuple[int, bytes]:
         "client": ("127.0.0.1", 1234),
     }
 
-    async def receive() -> dict:
-        return {"type": "http.request", "body": b"", "more_body": False}
-
     async def send(message: dict) -> None:
         messages.append(message)
 
-    asyncio.run(app(scope, receive, send))
+    asyncio.run(call_app_with_timeout(scope, send))
     body = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
     return messages[0]["status"], body
+
+
+def test_receive_disconnects_right_after_the_request() -> None:
+    async def first_three_messages() -> list[dict]:
+        receive = make_receive()
+        return [await asyncio.wait_for(receive(), timeout=1) for _ in range(3)]
+
+    first, second, third = asyncio.run(first_three_messages())
+
+    assert first == {"type": "http.request", "body": b"", "more_body": False}
+    assert second == third == {"type": "http.disconnect"}
 
 
 def test_raw_path_helper_serves_a_real_file() -> None:
