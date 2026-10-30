@@ -1,148 +1,125 @@
-"""Corpus export script: sampling, labeler assignment, CSV layout, and read-only behaviour."""
+"""Corpus export script: stratified sampling, CSV layout and read-only behaviour."""
 
 import csv
+import hashlib
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
-from sqlalchemy.engine import Engine
+import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+import app.db.base  # noqa: F401  (registers all models on Base.metadata)
+from app.db.session import Base
 from app.models.article import Article
 from app.models.source import Source
-from app.services.topic_model import OUTLIER_LABEL
-from scripts.export_corpus import COLUMNS, assign_labelers, build_rows, make_excerpt, write_csv
+from scripts.export_corpus import (
+    COLUMNS,
+    OUTLIER_LABEL,
+    load_articles,
+    proportional_quotas,
+    stratified_sample,
+    to_csv_row,
+    write_csv,
+)
 
 
-def add_articles(db: Session, counts: dict[str, int], status: str = "ai_analyzed") -> None:
-    for name, count in counts.items():
-        source = Source(name=name, feed_url=f"https://{name}.test/feed")
-        db.add(source)
-        db.flush()
-        for index in range(count):
-            db.add(
-                Article(
-                    source_id=source.id,
-                    title=f"{name} title {index}",
-                    url=f"https://{name}.test/{index}",
-                    content="robot research\nsecond line",
-                    summary="short summary",
-                    topic="robot · ai",
-                    confidence=0.9,
-                    status=status,
-                    published_at=datetime(2026, 1, 2, 3, 4, tzinfo=UTC),
-                )
-            )
-    db.commit()
+def fake_rows(plan: dict[tuple[str, str], int]) -> list[dict]:
+    """In-memory articles: plan maps (source, topic) to how many articles to make."""
+    rows = []
+    for (source, topic), count in plan.items():
+        for _ in range(count):
+            rows.append({"id": len(rows) + 1, "title": "t", "url": f"https://x.test/{len(rows)}",
+                         "source_name": source, "published_at": None,
+                         "model_topic": topic, "model_confidence": 0.5})  # fmt: skip
+    return rows
 
 
-def export(engine: Engine, size: int = 30, seed: int = 42, shared: int = 10):
+def make_db(path: Path, plan: dict[tuple[str, str], int], status: str = "ai_analyzed") -> Path:
+    """A real SQLite file with the app schema, filled from a (source, topic) plan."""
+    engine = create_engine(f"sqlite:///{path.as_posix()}")
+    Base.metadata.create_all(engine)
     with Session(engine) as db:
-        return build_rows(db, size, seed, labelers=4, shared=shared)
+        sources: dict[str, Source] = {}
+        for (name, topic), count in plan.items():
+            if name not in sources:
+                sources[name] = Source(name=name, feed_url=f"https://{name}.test/")
+                db.add(sources[name])
+            for n in range(count):
+                db.add(Article(source=sources[name], title=f"{name} {n}",
+                               url=f"https://{name}.test/{topic}/{n}", content="body",
+                               topic=topic, confidence=0.75, status=status,
+                               published_at=datetime(2026, 1, 2, 3, 4, tzinfo=UTC)))  # fmt: skip
+        db.commit()
+    engine.dispose()
+    return path
 
 
-def test_same_seed_gives_same_ids(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 20, "b": 20, "c": 20})
-    first, _ = export(engine)
-    second, _ = export(engine)
-    assert [r["article_id"] for r in first] == [r["article_id"] for r in second]
+def test_quotas_follow_source_sizes() -> None:
+    quotas = proportional_quotas(Counter({"big": 100, "mid": 50, "small": 50}), 50)
+    assert quotas == {"big": 25, "mid": 13, "small": 12}  # tie on .5 goes to the first name
 
 
-def test_small_source_gives_all_and_rest_share_quota(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"small": 5, "b": 30, "c": 30, "d": 30})
-    rows, _ = export(engine, size=30)
-    counts = Counter(r["source"] for r in rows)
-    assert counts["small"] == 5
-    assert len(rows) == 30
-    assert sorted(counts[s] for s in "bcd") == [8, 8, 9]
+def test_sample_is_proportional_by_source() -> None:
+    rows = fake_rows({("a", "T1"): 100, ("b", "T1"): 60, ("c", "T1"): 40})
+    counts = Counter(r["source_name"] for r in stratified_sample(rows, 50, seed=1))
+    assert counts == {"a": 25, "b": 15, "c": 10}
 
 
-def test_fewer_articles_than_size_exports_all(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 4, "b": 3})
-    rows, _ = export(engine, size=30)
-    assert len(rows) == 7
+def test_every_topic_and_five_outliers_are_covered() -> None:
+    rows = fake_rows({("a", "Main"): 180, ("a", "Rare"): 2, ("b", OUTLIER_LABEL): 8})
+    sample = stratified_sample(rows, 50, seed=3)
+    topics = Counter(r["model_topic"] for r in sample)
+    assert len(sample) == 50
+    assert topics["Rare"] >= 1
+    assert topics[OUTLIER_LABEL] >= 5
 
 
-def test_skips_articles_that_are_not_analyzed(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 5})
-        add_articles(db, {"b": 2}, status="missing_content")
-    rows, excluded = export(engine)
-    assert {r["source"] for r in rows} == {"a"}
-    assert excluded == {"missing_content": 2}
+def test_small_topic_gets_at_most_its_share() -> None:
+    rows = fake_rows({("a", "Main"): 190, ("b", "Small"): 10})
+    topics = Counter(r["model_topic"] for r in stratified_sample(rows, 50, seed=5))
+    assert topics["Small"] <= 3  # ceil(50 * 10 / 200)
 
 
-def test_assigned_to_counts() -> None:
-    assigned = assign_labelers(count=50, labelers=4, shared=10)
-    counts = Counter(assigned)
-    assert counts["all"] == 10
-    assert sorted(counts[f"L{n}"] for n in range(1, 5)) == [10, 10, 10, 10]
-    assert assigned[:10] == ["all"] * 10
+def test_same_seed_same_sample_and_different_seed_differs() -> None:
+    rows = fake_rows({("a", "T1"): 80, ("b", "T2"): 80})
+    ids = [[r["id"] for r in stratified_sample(rows, 30, seed=s)] for s in (7, 7, 8)]
+    assert ids[0] == ids[1]
+    assert ids[0] != ids[2]
 
 
-def test_csv_columns_and_empty_human_cells(engine: Engine, tmp_path: Path) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 12})
-    rows, _ = export(engine)
+def test_fewer_articles_than_size_exports_all() -> None:
+    rows = fake_rows({("a", "T1"): 4, ("b", OUTLIER_LABEL): 3})
+    assert len(stratified_sample(rows, 50, seed=1)) == 7
+
+
+def test_load_skips_unanalyzed_and_keeps_db_unchanged(tmp_path: Path) -> None:
+    db_path = make_db(tmp_path / "eval.db", {("a", "T1"): 3})
+    make_db(db_path, {("b", "T1"): 2}, status="missing_content")
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    rows = load_articles(db_path)
+    assert {r["source_name"] for r in rows} == {"a"}
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
+
+
+def test_missing_db_raises_instead_of_creating_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        load_articles(tmp_path / "missing.db")
+    assert not (tmp_path / "missing.db").exists()
+
+
+def test_csv_has_exact_columns_and_empty_human_cells(tmp_path: Path) -> None:
+    db_path = make_db(tmp_path / "eval.db", {("a", "T1"): 6, ("b", OUTLIER_LABEL): 2})
     out = tmp_path / "nested" / "corpus.csv"
-    write_csv(rows, out)
+    write_csv([to_csv_row(r) for r in load_articles(db_path)], out)
     with out.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        read_back = list(reader)
+        rows = list(reader)
     assert reader.fieldnames == COLUMNS
-    for name in ("human_ai_relevant", "human_topic", "human_topic_fit", "human_summary_ok"):
-        assert all(row[name] == "" for row in read_back)
-    assert len(read_back) == 12
-
-
-def test_excerpt_has_no_newlines_and_is_capped() -> None:
-    excerpt = make_excerpt("line one\r\nline two\n" + "x" * 2000)
-    assert "\n" not in excerpt and "\r" not in excerpt
-    assert len(excerpt) == 800
-
-
-def test_null_summary_and_outlier_flag(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 2})
-        first, second = db.scalars(select(Article).order_by(Article.id)).all()
-        first.summary = None
-        second.topic = OUTLIER_LABEL
-        db.commit()
-        first_id, second_id = first.id, second.id
-    rows, _ = export(engine)
-    by_id = {int(r["article_id"]): r for r in rows}
-    assert by_id[first_id]["system_summary"] == ""
-    assert by_id[first_id]["system_is_outlier"] == 0
-    assert by_id[second_id]["system_is_outlier"] == 1
-
-
-def test_baseline_topic_is_filled(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 1})
-    rows, _ = export(engine)
-    assert rows[0]["baseline_topic"] == "Robotics"
-
-
-def test_export_does_not_write_to_database(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 15, "b": 15})
-
-    def table_counts() -> tuple[int, int]:
-        with Session(engine) as db:
-            return tuple(db.scalar(select(func.count()).select_from(m)) for m in (Article, Source))
-
-    before = table_counts()
-    export(engine)
-    assert table_counts() == before
-
-
-def test_rows_are_not_grouped_by_source(engine: Engine) -> None:
-    with Session(engine) as db:
-        add_articles(db, {"a": 20, "b": 20})
-    rows, _ = export(engine)
-    sources = [r["source"] for r in rows]
-    assert sources != sorted(sources)
+    human = ("extractive_summary_ok", "human_topic", "topic_correct",
+             "summary_score_1_to_5", "notes")  # fmt: skip
+    assert all(row[name] == "" for row in rows for name in human)
+    assert rows[0]["published_at"] == "2026-01-02 03:04 UTC"
+    assert rows[0]["model_confidence"] == "0.75"
+    assert not {"content", "summary", "excerpt"} & set(reader.fieldnames)

@@ -1,0 +1,120 @@
+Topic robustness gate (DATA-3, read-only)
+Date (UTC): 2026-10-30 03:55
+Commit: a60d041
+Python: 3.14.7
+Command: python scripts/experiment_topics.py --robustness --db local-data/ainis_eval.db --robustness-out docs/evidence/topic_robustness.txt
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (HF_HUB_OFFLINE=1); documents: 200
+Embedding check against the vectors cached by the real job: 200 compared, max abs difference 0.0
+
+UMAP seeds, all documents (ok = 5-12 topics, big <= 40%, outliers <= 25%)
+ config seed topics  outl%   big%    npmi ok
+  (8,3)    0      3    0.5   89.0  0.1260 no
+  (8,3)    1      5    8.5   66.5 -0.0139 no
+  (8,3)    2      4    8.5   77.5 -0.0381 no
+  (8,3)    3      8   16.5   22.5 -0.0382 yes
+  (8,3)   42      7   14.5   36.0 -0.0213 yes
+  (8,1)    0     10   16.0   16.5 -0.0467 yes
+  (8,1)    1     10   14.5   20.5 -0.0408 yes
+  (8,1)    2     11   27.5   12.0 -0.0989 no
+  (8,1)    3     11   17.5   19.5 -0.0720 yes
+  (8,1)   42     10   17.5   13.5 -0.0837 yes
+
+(8, 3): 2/5 seeds meet the criteria (needed: 4)
+
+Small batches, proposed formula, UMAP seed 42 (reported only)
+   n subset mcs min_s topics  outl%   big%    npmi
+  50      1   8     3      2   22.0   52.0 -0.1634
+  50      2   8     3      2   62.0   22.0  0.0873
+  50      3   8     3      4   22.0   24.0 -0.0555
+ 100      1   8     3      2   26.0   37.0  0.1477
+ 100      2   8     3      2    3.0   89.0 -0.0833
+ 100      3   8     3      5   18.0   23.0  0.0541
+Small-batch errors: none
+
+Gate verdict: (8, 3) DOES NOT PASS
+
+DATA-3b: confirm min_cluster_size=max(2, min(8, n // 5)), min_samples=1. Config chosen after seeing seeds 0-3 and 42 (DATA-3); confirmed with new seeds 5-9 (read-only)
+Date (UTC): 2026-10-30 04:08
+Commit: dd3bdfc
+Python: 3.14.7
+Command: python scripts/experiment_topics.py --robustness --db local-data/ainis_eval.db --robustness-out docs/evidence/topic_robustness.txt --append --gate-min-samples 1 --compare-min-samples none --seeds 5,6,7,8,9 --section DATA-3b: confirm min_cluster_size=max(2, min(8, n / 5)), min_samples=1. Config chosen after seeing seeds 0-3 and 42 (DATA-3); confirmed with new seeds 5-9 (read-only)
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (HF_HUB_OFFLINE=1); documents: 200
+Embedding check against the vectors cached by the real job: 200 compared, max abs difference 0.0
+
+UMAP seeds, all documents (ok = 5-12 topics, big <= 40%, outliers <= 25%)
+ config seed topics  outl%   big%    npmi ok
+  (8,1)    5     10   29.0   17.0 -0.0764 no
+  (8,1)    6     12   19.5   14.0 -0.0255 yes
+  (8,1)    7      8   11.0   36.0 -0.0719 yes
+  (8,1)    8      9   14.5   23.0 -0.0534 yes
+  (8,1)    9     10   22.0   16.5 -0.1017 yes
+
+Top 5 keywords per topic
+  (8,1) seed 5
+    0: artificial intelligence, artificial, technology, intelligence, tech
+    1: mit, artificial intelligence, innovation, mit america, intelligence
+    2: google ai, google, amazon, microsoft, billion revenue
+    3: climate, warming, forecasting, forecasts, environmental
+    4: investors, stock market, stock, enterprise, market
+    5: microsoft ai, salesforce, microsoft, ai powered, automation
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: elon musk, elon, musk, ai, genius
+    8: bots, bot, model council, teams facilitator, digital duty
+    9: academic humanizer, researchers, humanizer, research, academic
+  (8,1) seed 6
+    0: google ai, google cloud, google, amazon, microsoft
+    1: mit, artificial intelligence, innovation, mit america, intelligence
+    2: climate, warming, forecasting, forecasts, environmental
+    3: investors, stock market, stock, enterprise, market
+    4: ai agents, mit technology, agents, technology review, agent
+    5: technology, intelligence, transformers, plastic, 3d
+    6: researchers, using ai, research, use ai, humanizer
+    7: elon musk, elon, ai companies, ai, musk
+    8: microsoft ai, salesforce, microsoft, ai powered, automation
+    9: agents, game, agent, vaccines, ai
+    10: hack binance, hack, vulnerabilities, internet, crypto
+    11: artificial neural, neural networks, neural network, artificial, neural
+  (8,1) seed 7
+    0: google, microsoft, amazon, cloud, ai
+    1: artificial intelligence, artificial, intelligence, technology, ai
+    2: mit, artificial intelligence, innovation, mit america, intelligence
+    3: investors, stock market, stock, enterprise, market
+    4: data centers, data centres, data centre, data center, climate
+    5: hack binance, hack, vulnerabilities, internet, crypto
+    6: elon musk, elon, musk, ai, genius
+    7: google cloud, cloud, gemini models, gemini carbon, open source
+  (8,1) seed 8
+    0: ai agents, ai, agent, agents, bots
+    1: artificial intelligence, artificial, intelligence, technology, scientists
+    2: mit, innovation, mit america, artificial intelligence, lincoln laboratory
+    3: data centers, data centres, data centre, data center, climate
+    4: cloud revenue, google cloud, billion revenue, microsoft, cloud business
+    5: investors, ipo prospectus, enterprise, anthropic said, anthropic
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: google ai, google meet, google, robots, foreign robots
+    8: elon musk, elon, musk, ai, genius
+  (8,1) seed 9
+    0: ai generated, salesforce, ai, games, bot
+    1: artificial intelligence, artificial, intelligence, technology, ai
+    2: google ai, google, amazon, microsoft, billion revenue
+    3: investors, stock market, stock, enterprise, market
+    4: tech industry, tech, intelligence, technology, engineering
+    5: mit libraries, mit, innovation fellow, mit reads, mit america
+    6: data centers, data centres, data centre, data center, climate
+    7: hack binance, hack, vulnerabilities, internet, crypto
+    8: elon musk, elon, musk, ai, genius
+    9: google cloud, cloud, gemini models, gemini carbon, open source
+
+(8, 1): 4/5 seeds meet the criteria (needed: 4)
+
+Small batches, proposed formula, UMAP seed 42 (reported only)
+   n subset mcs min_s topics  outl%   big%    npmi
+  50      1   8     1      3    6.0   50.0 -0.0727
+  50      2   8     1      3   14.0   46.0  0.0765
+  50      3   8     1      4    4.0   32.0 -0.0025
+ 100      1   8     1      2    5.0   52.0  0.2660
+ 100      2   8     1      2    0.0   92.0 -0.0913
+ 100      3   8     1      6    5.0   27.0 -0.0055
+Small-batch errors: none
+
+Gate verdict: (8, 1) PASSES

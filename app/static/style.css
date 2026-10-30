@@ -448,23 +448,26 @@ a { color: var(--color-primary); }
 .trend-count { font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .trend-score { font-size: var(--font-size-xs); font-weight: 700; color: var(--color-success); }
 
-/* Bar width comes from --bar, set by JavaScript with style.setProperty. */
+/* Thin bars are <progress value max> elements: the browser sizes the fill from the value,
+   so no style is set from JavaScript. Track and fill colors are set per engine below. */
 .trend-bar,
 .meter {
   display: block;
+  width: 100%;
   height: 4px;
-  background: var(--color-border);
+  border: none;
   border-radius: var(--radius-pill);
   overflow: hidden;
+  color: var(--color-primary);
+  background: var(--color-border);
+  appearance: none;
 }
-
-.trend-bar-fill,
-.meter-fill {
-  display: block;
-  width: var(--bar, 0%);
-  height: 100%;
-  background: var(--color-primary);
-}
+.trend-bar::-webkit-progress-bar,
+.meter::-webkit-progress-bar { background: var(--color-border); }
+.trend-bar::-webkit-progress-value,
+.meter::-webkit-progress-value { background: var(--color-primary); }
+.trend-bar::-moz-progress-bar,
+.meter::-moz-progress-bar { background: var(--color-primary); }
 
 .trend-caption { margin: var(--space-3) 0 0; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 
@@ -1018,7 +1021,8 @@ body.dialog-open { overflow: hidden; }
 .classified-row .result-title-button { min-height: 40px; } /* touch target */
 .classified-confidence { display: flex; flex-direction: column; gap: var(--space-1); }
 .confidence-label { font-size: var(--font-size-xs); color: var(--color-text-muted); }
-.meter-success .meter-fill { background: var(--color-success); }
+.meter-success::-webkit-progress-value { background: var(--color-success); }
+.meter-success::-moz-progress-bar { background: var(--color-success); }
 
 /* ===== Sources page: smaller screens ===== */
 
@@ -1060,4 +1064,116 @@ body.dialog-open { overflow: hidden; }
   .stat-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-form { flex-direction: column; }
   .source-table .btn-delete, .pill, .dialog-actions .btn { width: auto; }
+}
+
+/* ===== Topics page ===== */
+
+.hero-topics { padding-bottom: var(--space-12); }
+.topics-body { display: flex; flex-direction: column; gap: var(--space-6); }
+.topics-summary { margin: 0; color: var(--color-text-muted); }
+.topics-summary strong { color: var(--color-text); }
+
+.topic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+
+.topic-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 120px;
+  padding: var(--space-4);
+  font: inherit;
+  text-align: left;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+.topic-card:hover { border-color: var(--color-primary); }
+.topic-card:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.topic-card[aria-pressed="true"] { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-soft); }
+
+.topic-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.topic-chip {
+  max-width: 100%;
+  padding: 2px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-pill);
+  overflow-wrap: anywhere;
+}
+.topic-chip:first-child { font-size: var(--font-size-sm); }
+
+.topic-stats { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); font-size: var(--font-size-sm); }
+.topic-count { font-weight: 700; }
+.topic-share { color: var(--color-text-muted); }
+
+/* The outlier group: same card, dashed and muted, set apart below the topics. */
+.topic-card-outlier {
+  min-height: 0;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-style: dashed;
+  box-shadow: none;
+}
+.topic-outlier-title { font-weight: 600; overflow-wrap: anywhere; }
+.topic-outlier-note { font-size: var(--font-size-sm); }
+
+/* Articles per day: small SVG bar charts, sized by attributes, colored here. */
+/* The date row and every chart row share these columns, so the dates sit over the bars:
+   label (up to 16rem) | bars (up to 320px) | total, pushed to the end of the row. */
+.chart-head { flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
+.chart-head .panel-title { white-space: nowrap; }
+.chart-head .panel-subtitle { flex: 1 1 12rem; margin: 0; }
+.chart-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.chart-row,
+.chart-axis {
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) minmax(160px, 320px) minmax(max-content, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+}
+.chart-axis { margin-bottom: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.chart-axis-days { display: flex; justify-content: space-between; }
+.chart-total { justify-self: end; }
+.chart-name { font-size: var(--font-size-sm); font-weight: 600; overflow-wrap: anywhere; }
+.chart-svg { display: block; width: 100%; height: 40px; }
+.chart-bar { fill: var(--color-primary); }
+.chart-bar-empty { fill: var(--color-border); }
+.chart-total { font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+
+/* Articles of the selected topic */
+.topic-articles .panel-head { flex-direction: column; gap: 0; }
+/* The list heading gets focus from code after a topic is picked. Its ring shows only for
+   keyboard users (:focus-visible), not after a mouse click. Other elements keep theirs. */
+.topic-articles .panel-title:focus:not(:focus-visible) { outline: none; }
+.topic-articles .panel-title:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.topic-article-list { margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.topic-article { padding: var(--space-3) 0; }
+.topic-article + .topic-article { border-top: 1px solid var(--color-border); }
+.topic-article-title { overflow-wrap: anywhere; }
+.topic-article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.topic-article-source { font-weight: 600; }
+
+@media (max-width: 700px) {
+  .chart-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); }
+  .chart-svg { grid-column: 1 / -1; grid-row: 2; }
+  /* Bars span the full width here, so the dates do too. */
+  .chart-axis { grid-template-columns: minmax(0, 1fr); }
+  .chart-axis-spacer { display: none; }
 }

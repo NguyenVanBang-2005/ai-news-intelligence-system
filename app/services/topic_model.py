@@ -54,6 +54,19 @@ CONFIDENCE_HDBSCAN_SOFT = "hdbscan_soft"
 CONFIDENCE_FALLBACK = "fallback"
 FALLBACK_CONFIDENCE = 0.5
 
+# HDBSCAN sizes, tuned on a 200-article real corpus (docs/evidence/topic_robustness.txt,
+# DATA-3b). The old cap of 10 with default min_samples gave 2 topics, one holding 76%.
+MAX_MIN_CLUSTER_SIZE = 8
+HDBSCAN_MIN_SAMPLES = 1
+
+
+def hdbscan_sizes(document_count: int) -> tuple[int, int]:
+    """(min_cluster_size, min_samples) for a batch of `document_count` documents."""
+
+    min_cluster_size = max(2, min(MAX_MIN_CLUSTER_SIZE, document_count // 5))
+
+    return min_cluster_size, HDBSCAN_MIN_SAMPLES
+
 
 @dataclass(frozen=True)
 class TopicProcessingResult:
@@ -467,10 +480,7 @@ class TopicModelService:
             max(2, document_count - 2),
         )
 
-        min_cluster_size = max(
-            2,
-            min(10, document_count // 5),
-        )
+        min_cluster_size, min_samples = hdbscan_sizes(document_count)
 
         umap_model = UMAP(
             n_neighbors=n_neighbors,
@@ -482,6 +492,7 @@ class TopicModelService:
 
         hdbscan_model = HDBSCAN(
             min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
             metric="euclidean",
             cluster_selection_method="eom",
             prediction_data=True,

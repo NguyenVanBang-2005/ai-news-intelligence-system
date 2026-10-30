@@ -1,0 +1,222 @@
+Evaluation dataset summary (real RSS corpus, local SQLite, read-only statistics)
+Date (UTC): 2026-10-30 03:09
+Branch/commit: data/corpus-eval @ f30065e (scripts and docs of this step uncommitted)
+Python: 3.14.7 (host venv, no Docker)
+Database: SQLite local-data/ainis_eval.db (gitignored), alembic upgrade head -> 0007_source_sync_status
+API run: uvicorn app.main:app --port 8021 with DATABASE_URL=sqlite:///./local-data/ainis_eval.db,
+         HF_HUB_OFFLINE=1, AI_PRELOAD_MODEL=true, INGESTION_FULL_TEXT=true,
+         ADMIN_API_TOKEN random per session (not recorded). MAX_FEED_ITEMS=50 (from .env).
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (EMBEDDING_MODEL_NAME in .env)
+AI settings: AI_BATCH_SIZE=500, AI_MIN_DOCUMENTS=10, DUPLICATE_SIMILARITY_THRESHOLD=0.92 (.env);
+             AI_OUTLIER_MIN_SIMILARITY=0.75, AI_TOPIC_MATCH_THRESHOLD=0.9, AI_ZEROSHOT_TOPICS empty (defaults)
+
+Topic model parameters (app/services/topic_model.py, values for this 200-document batch)
+  UMAP:     n_neighbors=15, n_components=5, min_dist=0.0, metric=cosine, random_state=42
+  HDBSCAN:  min_cluster_size=10 (max(2, min(10, n // 5))), min_samples=library default,
+            metric=euclidean, cluster_selection_method=eom, prediction_data=True
+  Vectorizer: CountVectorizer(stop_words=english, ngram_range=(1, 2), min_df=1)
+  Representation: KeyBERTInspired -> MaximalMarginalRelevance(diversity=0.3), top_n_words=20
+  BERTopic: calculate_probabilities=True; min_topic_size and nr_topics not set
+  Outliers: reduce_outliers(strategy=embeddings, threshold=0.75)
+  Merging:  reduce_topics(nr_topics=auto) only when a batch has >= 3 topics
+
+Sources added (POST /sources, all 201)
+  MIT Technology Review  https://www.technologyreview.com/feed/                              ok, 10 articles
+  The Verge AI           https://www.theverge.com/rss/ai-artificial-intelligence/index.xml   ok, 10 articles
+  VentureBeat AI         https://venturebeat.com/category/ai/feed/                           error: HTTP 429 (Vercel Security Checkpoint page)
+  BBC Technology         https://feeds.bbci.co.uk/news/technology/rss.xml                    ok, 20 articles
+  AI News                https://www.artificialintelligence-news.com/feed/                   error: HTTP 202 text/html (SiteGround captcha page)
+  Added because the corpus was below 150:
+  TechCrunch AI          https://techcrunch.com/category/artificial-intelligence/feed/       ok, 20 articles
+  Ars Technica AI        https://arstechnica.com/ai/feed/                                    ok, 20 articles
+  MIT News AI            https://news.mit.edu/rss/topic/artificial-intelligence2             ok, 50 articles
+  Guardian AI            https://www.theguardian.com/technology/artificialintelligenceai/rss ok, 20 articles
+  The Register AI/ML     https://www.theregister.com/software/ai_ml/headlines.atom           ok, 50 articles
+
+Feeds blocked by bot protection (skipped, no code change):
+  VentureBeat AI: HTTP 429, Vercel Security Checkpoint page (venturebeat.com/feed/ also 429)
+  AI News:        HTTP 202 text/html, SiteGround captcha page instead of the RSS feed
+
+POST /ingestion/run (sources_processed / articles_seen / articles_created / duplicates_skipped)
+  run 1 (5 sources):  5 / 40 / 40 / 0      errors: AI News, VentureBeat AI (above)
+  run 2 (10 sources): 10 / 200 / 160 / 40  errors: same 2
+  run 3 (10 sources): 10 / 200 / 0 / 200   errors: same 2  -> dedup confirmed
+
+POST /ai/process {} -> job 275b6203-e2ff-4d43-953e-46db91c5d713
+  status succeeded; started 03:08:42Z, finished 03:09:01Z (~19 s, model already preloaded)
+  documents_received 200, unique_documents 200, semantic_duplicates 0, topics_created 2,
+  articles_updated 200, confidence_method hdbscan_soft, topic_coherence 0.2461
+  uvicorn process peak working set (whole process lifetime): ~1.7 GB
+
+Statistics command:
+  python scripts/corpus_stats.py --db local-data/ainis_eval.db   (read-only; output below)
+
+Total articles: 200
+Outliers (Other / Outlier): 36 (18.0%)
+
+Articles by source
+------------------
+source                 last_status  articles
+---------------------  -----------  --------
+MIT Technology Review  ok           10
+The Verge AI           ok           10
+VentureBeat AI         error        0
+BBC Technology         ok           20
+AI News                error        0
+TechCrunch AI          ok           20
+Ars Technica AI        ok           20
+MIT News AI            ok           50
+Guardian AI            ok           20
+The Register AI/ML     ok           50
+
+Articles by topic (articles.topic)
+----------------------------------
+topic                                           articles  share
+----------------------------------------------  --------  -----
+intelligence · tech · technology · researchers  152       76.0%
+Other / Outlier                                 36        18.0%
+investors · stock · enterprise · market         12        6.0%
+
+Articles by source x topic
+--------------------------
+source                 T1   T2  T3  total
+---------------------  ---  --  --  -----
+Ars Technica AI        9    10  1   20
+BBC Technology         12   6   2   20
+Guardian AI            11   8   1   20
+MIT News AI            50   0   0   50
+MIT Technology Review  7    1   2   10
+TechCrunch AI          14   5   1   20
+The Register AI/ML     43   4   3   50
+The Verge AI           6    2   2   10
+total                  152  36  12  200
+  T1 = intelligence · tech · technology · researchers
+  T2 = Other / Outlier
+  T3 = investors · stock · enterprise · market
+
+Stored topics (topics table)
+----------------------------
+id  label                                           article_count  top 5 keywords
+--  ----------------------------------------------  -------------  ----------------------------------------------------
+1   intelligence · tech · technology · researchers  152            intelligence, tech, technology, researchers, ai
+2   investors · stock · enterprise · market         12             investors, stock, enterprise, market, anthropic said
+
+Content and dates
+-----------------
+metric                         value
+-----------------------------  ---------------
+with published_at              200
+without published_at           0
+median content length (chars)  4004
+status missing_content         0
+status breakdown               ai_analyzed=200
+
+
+==================================================================
+AFTER DATA-3b: same 200 articles, app topic config changed
+Date (UTC): 2026-10-30 04:14; base commit dd3bdfc + uncommitted DATA-3b change in app/services/topic_model.py
+App config after DATA-3b: min_cluster_size = max(2, min(8, n // 5)) (was max(2, min(10, n // 5))),
+  min_samples = 1 (was the HDBSCAN default, i.e. min_cluster_size). Everything else unchanged.
+  The sections above describe the old config; the old config's full grid is in
+  docs/evidence/topic_param_experiment.txt and the stability gate in topic_robustness.txt.
+Database: copy local-data/ainis_eval_v2.db (local-data/ainis_eval.db untouched). Reset in the copy:
+  articles.topic = NULL, articles.confidence = NULL, articles.status 'ai_analyzed' -> 'analyzed' (200 rows);
+  all rows deleted from topics (2) and ai_jobs (1). Kept: the 200 articles, sources, summary,
+  embedding cache (same model and text, identical to a fresh encode). No new ingestion.
+API run: uvicorn --port 8021, DATABASE_URL -> the copy, HF_HUB_OFFLINE=1, AI_PRELOAD_MODEL=true,
+  ADMIN_API_TOKEN random per session (not recorded).
+
+POST /ai/process {} -> job d3de793a-8bc6-4b6c-a3db-3482f42b36b8
+  status succeeded; started 04:13:00Z, finished 04:13:25Z (~24.5 s, model already preloaded)
+  documents_received 200, unique_documents 200, semantic_duplicates 0, topics_created 10,
+  articles_updated 200, confidence_method hdbscan_soft, topic_coherence -0.0837
+  uvicorn process peak working set (whole process lifetime): ~1.67 GB
+  Same as the experiment for (8,1), UMAP seed 42: 10 topics, 35 outliers, NPMI -0.0837.
+
+Statistics command:
+  python scripts/corpus_stats.py --db local-data/ainis_eval_v2.db   (read-only; output below)
+
+Total articles: 200
+Outliers (Other / Outlier): 35 (17.5%)
+
+Articles by source
+------------------
+source                 last_status  articles
+---------------------  -----------  --------
+MIT Technology Review  ok           10
+The Verge AI           ok           10
+VentureBeat AI         error        0
+BBC Technology         ok           20
+AI News                error        0
+TechCrunch AI          ok           20
+Ars Technica AI        ok           20
+MIT News AI            ok           50
+Guardian AI            ok           20
+The Register AI/ML     ok           50
+
+Articles by topic (articles.topic)
+----------------------------------
+topic                                                         articles  share
+------------------------------------------------------------  --------  -----
+Other / Outlier                                               35        17.5%
+salesforce · microsoft · enterprise · ai                      27        13.5%
+artificial intelligence · artificial · machines · technology  26        13.0%
+mit · artificial intelligence · innovation · mit america      24        12.0%
+google ai · google · amazon · microsoft                       21        10.5%
+game · vaccines · ai · malicious                              13        6.5%
+investors · stock market · stock · enterprise                 13        6.5%
+data centers · data centres · data centre · data center       12        6.0%
+researchers · using ai · research · use ai                    12        6.0%
+hack binance · hack · vulnerabilities · internet              9         4.5%
+elon musk · elon · musk · ai                                  8         4.0%
+
+Articles by source x topic
+--------------------------
+source                 T1  T2  T3  T4  T5  T6  T7  T8  T9  T10  T11  total
+---------------------  --  --  --  --  --  --  --  --  --  ---  ---  -----
+Ars Technica AI        7   1   1   0   6   0   1   1   0   1    2    20
+BBC Technology         3   0   2   1   2   0   2   6   0   3    1    20
+Guardian AI            1   3   0   3   1   1   2   1   1   2    5    20
+MIT News AI            2   0   18  19  0   2   0   3   6   0    0    50
+MIT Technology Review  4   0   3   0   0   0   2   1   0   0    0    10
+TechCrunch AI          5   2   0   0   8   0   1   0   1   3    0    20
+The Register AI/ML     11  18  1   1   4   9   3   0   3   0    0    50
+The Verge AI           2   3   1   0   0   1   2   0   1   0    0    10
+total                  35  27  26  24  21  13  13  12  12  9    8    200
+  T1 = Other / Outlier
+  T2 = salesforce · microsoft · enterprise · ai
+  T3 = artificial intelligence · artificial · machines · technology
+  T4 = mit · artificial intelligence · innovation · mit america
+  T5 = google ai · google · amazon · microsoft
+  T6 = game · vaccines · ai · malicious
+  T7 = investors · stock market · stock · enterprise
+  T8 = data centers · data centres · data centre · data center
+  T9 = researchers · using ai · research · use ai
+  T10 = hack binance · hack · vulnerabilities · internet
+  T11 = elon musk · elon · musk · ai
+
+Stored topics (topics table)
+----------------------------
+id  label                                                         article_count  top 5 keywords
+--  ------------------------------------------------------------  -------------  -----------------------------------------------------------------------
+1   salesforce · microsoft · enterprise · ai                      27             salesforce, microsoft, enterprise, ai, agents
+2   artificial intelligence · artificial · machines · technology  26             artificial intelligence, artificial, machines, technology, transformers
+3   mit · artificial intelligence · innovation · mit america      24             mit, artificial intelligence, innovation, mit america, intelligence
+4   google ai · google · amazon · microsoft                       21             google ai, google, amazon, microsoft, robots
+5   game · vaccines · ai · malicious                              13             game, vaccines, ai, malicious, app
+6   investors · stock market · stock · enterprise                 13             investors, stock market, stock, enterprise, market
+7   researchers · using ai · research · use ai                    12             researchers, using ai, research, use ai, humanizer
+8   data centers · data centres · data centre · data center       12             data centers, data centres, data centre, data center, climate
+9   hack binance · hack · vulnerabilities · internet              9              hack binance, hack, vulnerabilities, internet, crypto
+10  elon musk · elon · musk · ai                                  8              elon musk, elon, musk, ai, genius
+
+Content and dates
+-----------------
+metric                         value
+-----------------------------  ---------------
+with published_at              200
+without published_at           0
+median content length (chars)  4004
+status missing_content         0
+status breakdown               ai_analyzed=200
+
