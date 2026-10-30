@@ -50,6 +50,13 @@ class SourceRepository:
     def get(self, source_id: int) -> Source | None:
         return self.db.get(Source, source_id)
 
+    def set_active(self, source: Source, is_active: bool) -> Source:
+        """Turn ingestion of this source on or off."""
+        source.is_active = is_active
+        self.db.commit()
+        self.db.refresh(source)
+        return source
+
     def delete(self, source: Source) -> None:
         self.db.delete(source)
         self.db.commit()

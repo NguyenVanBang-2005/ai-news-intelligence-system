@@ -7,8 +7,11 @@ lookup (422/404/409) before any download or model load.
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.ai_job import AIJob
 from tests.pg_support import TEST_ADMIN_TOKEN
 
 PROTECTED = [
@@ -79,9 +82,20 @@ def test_public_reads_need_no_token(anonymous: TestClient, path: str) -> None:
     assert anonymous.get(path).status_code == 200
 
 
-def test_job_status_needs_no_token(anonymous: TestClient) -> None:
-    # Unknown job: 404, not 401, so the read path is not behind the token.
-    assert anonymous.get("/api/v1/ai/process/unknown").status_code == 404
+def test_job_status_needs_the_admin_token(
+    anonymous: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A job's `error` may hold internal details, so reading it is admin only.
+    with Session(engine) as db:
+        db.add(AIJob(id="job-1", status="succeeded", parameters={}))
+        db.commit()
+    path = "/api/v1/ai/process/job-1"
+
+    assert call(anonymous, "GET", path, {}).status_code == 401
+    assert call(anonymous, "GET", path, {}, "wrong-token").status_code == 401
+    assert call(anonymous, "GET", path, {}, TEST_ADMIN_TOKEN).status_code == 200
+    monkeypatch.setattr(settings, "admin_api_token", None)
+    assert call(anonymous, "GET", path, {}, TEST_ADMIN_TOKEN).status_code == 503
 
 
 def test_article_detail_needs_no_token(anonymous: TestClient) -> None:

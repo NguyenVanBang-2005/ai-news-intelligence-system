@@ -3,164 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>News Search</title>
-  <style>
-    :root {
-      --bg: #f7f7f5;
-      --card: #ffffff;
-      --text: #1f2328;
-      --muted: #656d76;
-      --border: #d8dee4;
-      --accent: #0969da;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0d1117;
-        --card: #161b22;
-        --text: #e6edf3;
-        --muted: #8d96a0;
-        --border: #30363d;
-        --accent: #4493f8;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-    }
-    main { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
-    h1 { font-size: 1.5rem; margin: 0 0 16px; }
-    form { display: flex; gap: 8px; }
-    input {
-      flex: 1;
-      min-width: 0;
-      padding: 10px 12px;
-      font: inherit;
-      color: var(--text);
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-    button {
-      padding: 10px 18px;
-      font: inherit;
-      color: #fff;
-      background: var(--accent);
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    button:disabled { opacity: 0.6; cursor: wait; }
-    .hint, .meta, .status { color: var(--muted); font-size: 0.875rem; }
-    .status.error { color: #cf222e; }
-    .source {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 16px;
-    }
-    .source h2 { font-size: 1rem; margin: 0 0 4px; }
-    .source a { color: var(--accent); text-decoration: none; }
-    .source a:hover { text-decoration: underline; }
-    .source p { margin: 8px 0 0; }
-  </style>
+  <title>Search · AINIS</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/app.js"></script>
 </head>
 <body>
-  <main>
-    <h1>News Search</h1>
-    <form id="search-form">
-      <input id="search-input" name="input" required minlength="2" maxlength="500"
-             placeholder="Search the news by keywords"
-             autocomplete="off">
-      <button id="search-button" type="submit">Search</button>
-    </form>
-    <p class="hint">Results come from articles already collected. Links are not accepted here.</p>
-    <div id="results"></div>
+  <header class="topbar">
+    <a class="brand" href="#/search">
+      <img class="brand-logo" src="/static/img/logo.png" alt="AINIS - AI News Intelligence" width="280" height="58">
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link" href="#/search" data-route="search">Search</a>
+      <a class="nav-link" href="#/topics" data-route="topics">Topics</a>
+      <a class="nav-link" href="#/sources" data-route="sources">Sources</a>
+      <a class="nav-link" href="/docs">API (Swagger)</a>
+    </nav>
+  </header>
+
+  <main id="app" class="app" tabindex="-1">
+    <noscript><p class="noscript">This page needs JavaScript. The API is documented at /docs.</p></noscript>
   </main>
 
-  <script>
-    const form = document.getElementById("search-form");
-    const input = document.getElementById("search-input");
-    const button = document.getElementById("search-button");
-    const results = document.getElementById("results");
-
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      button.disabled = true;
-      showStatus("Searching…");
-
-      try {
-        const response = await fetch("/api/v1/ai/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: input.value }),
-        });
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          showStatus(errorMessage(response.status, data), true);
-          return;
-        }
-        showResults(data);
-      } catch {
-        showStatus("The server could not be reached.", true);
-      } finally {
-        button.disabled = false;
-      }
-    });
-
-    function errorMessage(status, data) {
-      // FastAPI sends a string (e.g. for a pasted link), or a list of validation errors.
-      if (typeof data.detail === "string") return data.detail;
-      if (status === 422) return "Please enter 2 to 500 characters.";
-      if (status === 429) return "Too many searches. Please wait a moment and try again.";
-      return `Search failed (HTTP ${status}). Please try again later.`;
-    }
-
-    function showStatus(message, isError = false) {
-      results.replaceChildren(element("p", isError ? "status error" : "status", message));
-    }
-
-    function showResults(data) {
-      if (data.sources.length === 0) {
-        showStatus("No relevant articles found. Try other words.");
-        return;
-      }
-
-      results.replaceChildren(
-        ...data.sources.map((source, index) => sourceCard(source, index + 1))
-      );
-    }
-
-    function sourceCard(source, number) {
-      const card = element("article", "source");
-      const title = element("h2");
-      const link = element("a", "", `[${number}] ${source.title}`);
-      link.href = source.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      title.append(link);
-
-      const date = source.published_at
-        ? new Date(source.published_at).toLocaleDateString()
-        : "date unknown";
-      const method = source.summary_method === "extractive" ? "Excerpt" : "AI summary";
-      const meta = element("div", "meta", `${source.source_name} · ${date} · ${method}`);
-
-      card.append(title, meta, element("p", "", source.summary));
-      return card;
-    }
-
-    // Text is always set with textContent, so article content can never inject HTML.
-    function element(tag, className = "", text = "") {
-      const node = document.createElement(tag);
-      if (className) node.className = className;
-      if (text) node.textContent = text;
-      return node;
-    }
-  </script>
+  <footer class="footer">
+    <span>AINIS · AI News Intelligence</span>
+    <span>Results come from articles already collected.</span>
+  </footer>
 </body>
 </html>

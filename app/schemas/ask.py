@@ -14,6 +14,8 @@ class AskSource(BaseModel):
     title: str
     url: str
     source_name: str
+    # Article.topic: a heuristic label at ingestion, a topic-model label after /ai/process.
+    topic: str | None
     published_at: datetime | None
     # Cosine similarity to the request, 0-1.
     similarity: float

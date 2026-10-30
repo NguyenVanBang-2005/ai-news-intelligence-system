@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.article import Article
 
@@ -73,6 +73,7 @@ class ArticleRepository:
         total = self.db.scalar(select(func.count(Article.id)).where(*filters)) or 0
         statement = (
             select(Article)
+            .options(joinedload(Article.source))  # source_name without a query per article
             .where(*filters)
             .order_by(Article.published_at.desc().nulls_last(), Article.id.desc())
             .limit(limit)
@@ -81,7 +82,7 @@ class ArticleRepository:
         return list(self.db.scalars(statement)), total
 
     def get(self, article_id: int) -> Article | None:
-        return self.db.get(Article, article_id)
+        return self.db.get(Article, article_id, options=[joinedload(Article.source)])
 
     def get_many(self, article_ids: set[int]) -> list[Article]:
         if not article_ids:
@@ -122,6 +123,27 @@ class ArticleRepository:
             (topic, recent_count, baseline_count)
             for topic, recent_count, baseline_count in self.db.execute(statement).all()
         ]
+
+    def topic_timestamps(
+        self, *, topics: list[str], start: datetime, end: datetime, max_rows: int
+    ) -> list[tuple[str, datetime]]:
+        """(topic, article time) for articles of these topics in [start, end), newest first.
+
+        Article time is coalesce(published_at, created_at), as in topic_counts. At most
+        max_rows rows are read, so when the cap is hit the oldest ones are left out.
+        """
+        article_time = func.coalesce(Article.published_at, Article.created_at)
+        statement = (
+            select(Article.topic, article_time)
+            .where(
+                Article.topic.in_(topics),
+                article_time >= start,
+                article_time < end,
+            )
+            .order_by(article_time.desc())
+            .limit(max_rows)
+        )
+        return [(topic, moment) for topic, moment in self.db.execute(statement).all()]
 
     @staticmethod
     def _ai_processing_filters(*, force: bool) -> list:

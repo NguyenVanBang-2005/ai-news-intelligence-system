@@ -32,6 +32,11 @@ class Article(Base):
 
     source: Mapped["Source"] = relationship(back_populates="articles")  # noqa: F821
 
+    @property
+    def source_name(self) -> str:
+        """Name of the source this article was collected from."""
+        return self.source.name
+
     def cached_embedding(self, key: str) -> np.ndarray | None:
         if self.embedding is None or self.embedding_key != key:
             return None

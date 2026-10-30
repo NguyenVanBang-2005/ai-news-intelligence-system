@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DbSession, require_admin
 from app.repositories.source import SourceRepository
-from app.schemas.source import SourceCreate, SourceRead
+from app.schemas.source import SourceCreate, SourceRead, SourceUpdate
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -27,6 +27,20 @@ def create_source(payload: SourceCreate, db: DbSession) -> SourceRead:
 @router.get("", response_model=list[SourceRead])
 def list_sources(db: DbSession) -> list[SourceRead]:
     return SourceRepository(db).list()
+
+
+@router.patch(
+    "/{source_id}",
+    response_model=SourceRead,
+    dependencies=[Depends(require_admin)],
+)
+def update_source(source_id: int, payload: SourceUpdate, db: DbSession) -> SourceRead:
+    """Turn a source on or off; inactive sources are skipped by ingestion."""
+    repository = SourceRepository(db)
+    source = repository.get(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return repository.set_active(source, payload.is_active)
 
 
 @router.delete(

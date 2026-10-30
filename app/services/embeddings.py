@@ -1,7 +1,6 @@
 """Article and query embeddings, shared by topic modelling and news search."""
 
 import hashlib
-from functools import lru_cache
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -9,23 +8,22 @@ from sentence_transformers import SentenceTransformer
 from app.core.config import settings
 from app.models.article import Article
 from app.repositories.article import ArticleRepository
+from app.services import model_preload
 
 # Prevent one very long article from dominating its embedding.
 MAX_EMBEDDED_CONTENT_CHARS = 10_000
 
 
-@lru_cache(maxsize=1)
 def get_embedding_model() -> SentenceTransformer:
     """
-    Load the model only once.
+    Load the model only once, also when several requests (or the startup
+    preload) ask for it at the same time.
 
     The first call may take longer because the model must be
     downloaded and loaded into memory.
     """
 
-    return SentenceTransformer(
-        settings.embedding_model_name
-    )
+    return model_preload.embedding_model.get()
 
 
 def build_document(*, title: str, content: str) -> str:

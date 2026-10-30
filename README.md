@@ -63,13 +63,172 @@ với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal ch�
 
 ## Token quản trị
 
-`POST`/`DELETE /api/v1/sources`, `POST /api/v1/ingestion/run`, `POST /api/v1/ai/process` và
+`POST /api/v1/sources`, `PATCH`/`DELETE /api/v1/sources/{source_id}`,
+`POST /api/v1/ingestion/run`, `POST /api/v1/ai/process`, `GET /api/v1/ai/process/{job_id}` và
 `POST /api/v1/ai/ask` cần header `X-Admin-Token` khớp `ADMIN_API_TOKEN`. Chưa đặt
 `ADMIN_API_TOKEN` thì các endpoint này trả 503; thiếu hoặc sai token thì trả 401. Tạo token:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+## Bảo mật HTTP
+
+- Mọi response (API, `/`, `/static/...`, `/docs`, lỗi 404/413) có các header
+  (`app/core/security_headers.py`):
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Permissions-Policy: camera=(), microphone=(), geolocation=()`. Response 500 do
+  `ServerErrorMiddleware` của Starlette tạo nằm ngoài middleware này nên có thể thiếu header.
+- **Content-Security-Policy** chỉ cho giao diện web (`/` và `/static/...`), xem mục
+  "Giao diện web". Không áp cho `/docs`, `/redoc` (tải Swagger UI/ReDoc từ CDN, có script
+  inline), `/openapi.json` và `/api/*`.
+- **Không có CORS**: không cài `CORSMiddleware`, trình duyệt chỉ gọi API từ cùng origin. UI chạy
+  chung server nên không cần.
+- File tĩnh: `/static/<file>` phục vụ đúng thư mục `app/static` (không liệt kê thư mục, không
+  tự trả `index.html`, path traversal trả 404). `GET /` vẫn trả `index.html`. UI nhiều trang dùng
+  hash route (`#/search`, `#/topics`, `#/sources`), server không có route trang riêng.
+- Endpoint admin (cần `X-Admin-Token`): `POST /sources`, `PATCH`/`DELETE /sources/{source_id}`,
+  `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask`.
+
+## Giao diện web
+
+Mở <http://127.0.0.1:8001/> (Docker Compose, `API_PORT=8001`). Viết bằng HTML/CSS/JavaScript
+thuần: không build step, không CDN, không thư viện ngoài. UI chỉ gọi API cùng origin
+(`fetch("/api/v1/...")`); server không bật CORS nên trang ở origin khác không gọi được API.
+
+```text
+app/static/
+  index.html        shell: header (logo + nav), <main id="app">, footer; không script/style inline
+  style.css         biến CSS (màu, spacing, bo góc, bóng), responsive từ 380px
+  app.js            điểm vào: khai báo route, chạy router
+  img/logo.png      logo 280x58 (đã gồm tagline "AI News Intelligence"; header phải nền #FFFFFF)
+  js/api.js         request(path, {method, body, admin}): fetch cùng origin, timeout, phân loại lỗi
+  js/dom.js         el(), externalLink(), safeHref(): dựng DOM an toàn
+  js/format.js      ngày giờ (Asia/Ho_Chi_Minh), số, điểm "+2.1σ", phần trăm
+  js/router.js      hash router
+  js/components.js  loading, empty state, banner lỗi, badge, thẻ, "Coming soon"
+  js/trending.js    fetchTrending(): GET /topics/trending, cache trong bộ nhớ 60 s
+  js/drawer.js      panel trượt (dialog): focus, Tab xoay vòng, Esc, khóa cuộn nền
+  js/pages/search.js          trang Search: ô tìm, chip trending, bố cục kết quả + sidebar
+  js/pages/search-results.js  danh sách kết quả (POST /api/v1/ai/search)
+  js/pages/trending-ui.js     chip "Trending:" và sidebar "Trending topics"
+  js/pages/article-drawer.js  drawer chi tiết bài (GET /api/v1/articles/{id})
+  js/focus-trap.js            giữ focus Tab trong drawer/hộp thoại
+  js/admin-token.js           token admin của tab (sessionStorage) + adminRequest()
+  js/confirm-dialog.js        hộp thoại xác nhận tự dựng (role="alertdialog")
+  js/pages/sources.js         trang Sources: ghép các phần dưới
+  js/pages/admin-access.js    khối "Admin access": nhập, dùng, xóa token
+  js/pages/rescan.js          nút "Rescan sources", 4 thẻ số liệu, kết quả lần chạy cuối
+  js/pages/source-form.js     form thêm nguồn RSS/Atom
+  js/pages/source-list.js     bảng "Source list": trạng thái, bật/tắt, xóa
+  js/pages/source-status.js   tên ngôn ngữ và trạng thái đồng bộ (tính ở client)
+  js/pages/classified-list.js "Latest classified articles" + lọc theo topic
+```
+
+### Trang Search: nguồn dữ liệu từng phần
+
+| Phần | Dữ liệu | Ghi chú |
+|---|---|---|
+| Ô tìm + danh sách kết quả | `POST /api/v1/ai/search` | Tiêu đề và mũi tên mở drawer, không mở thẳng trang gốc |
+| Chip "Trending:" ở hero | `GET /api/v1/topics/trending?window_hours=24&baseline_days=7&min_articles=2&limit=10` | Tối đa 4 topic điểm cao nhất; danh sách rỗng hoặc lỗi thì ẩn cả hàng chip |
+| Sidebar "Trending topics" | Cùng request với chip (một request mỗi lần mở trang, cache 60 s) | Chỉ hiện sau lần tìm đầu; lỗi thì hiện "Trending is unavailable right now." |
+| Drawer chi tiết bài | `GET /api/v1/articles/{id}` | Gọi mỗi lần mở; 404 hiện "This article is no longer available."; lỗi khác có nút Retry |
+
+Các quyết định:
+- **Điểm trending là xấp xỉ** (`trend_score`, số độ lệch chuẩn so với mức thường). Nhãn "24h" và
+  chú thích "24 hours / 7 days" lấy từ chính tham số đã gửi (`TRENDING_PARAMS` trong
+  `js/trending.js`). Thanh tiến độ tỉ lệ với điểm cao nhất trong danh sách.
+- Bấm chip hoặc một dòng sidebar: điền topic vào ô tìm và tìm luôn.
+- **Drawer không có deep-link**: mở hoặc đóng drawer không đổi URL/hash, và đổi route sẽ đóng
+  drawer. Drawer đọc mọi trường từ `GET /articles/{id}`, không dùng lại dữ liệu của kết quả
+  search. Nội dung dài hơn 4000 ký tự có nút "Show full text" (không gọi API thêm). Nút "Open
+  original article" chỉ hiện khi URL là `http(s)://`.
+- Truy cập: drawer có `role="dialog"`, `aria-modal`, focus vào nút đóng khi mở, Tab/Shift+Tab
+  xoay vòng trong drawer, Esc hoặc bấm nền mờ để đóng, focus trả về nút đã mở; nền bị khóa cuộn
+  bằng class `drawer-open` trên `<body>`; `prefers-reduced-motion` tắt hiệu ứng trượt.
+
+### Trang Sources (`#/sources`)
+
+| Phần | Dữ liệu | Ghi chú |
+|---|---|---|
+| Khối "Admin access" | (không gọi API) | Ô password, "Use token", "Clear token"; trạng thái "No token: read-only" / "Token set (not verified yet)" / "Token verified" |
+| Nút "Rescan sources" + 4 thẻ | `POST /api/v1/ingestion/run` (admin) | Thẻ hiện "–" đến lần Rescan đầu; tỉ lệ trùng = `duplicates_skipped / articles_seen` (ẩn khi bằng 0) |
+| Form "Add an RSS/Atom source" | `POST /api/v1/sources` (admin, `type: "rss"`) | Kiểm tên 2-120 ký tự và URL `http(s)://` trước khi gửi; 409/422 có thông báo riêng |
+| Bảng "Source list" | `GET /api/v1/sources` (public) | Trạng thái Stable/Warning/Error/Inactive/Not synced yet tính từ `is_active`, `last_status`, `last_error`, `last_synced_at`; URL feed là chữ thường, không phải link |
+| Công tắc Active | `PATCH /api/v1/sources/{id}` (admin) | Không cập nhật lạc quan: chỉ đổi theo `SourceRead` server trả về |
+| Nút Delete | `DELETE /api/v1/sources/{id}` (admin) | Luôn qua hộp thoại xác nhận, focus mặc định ở Cancel |
+| "Latest classified articles" | `GET /api/v1/articles?status=ai_analyzed&limit=10[&topic=...]`, `GET /api/v1/ai/topics` | Pill "All" + tối đa 8 topic lớn nhất; bấm dòng mở drawer chi tiết bài |
+
+**Token admin** (chỉ dùng trên máy local tin cậy):
+- Token được giữ trong `sessionStorage` của tab (nếu trình duyệt chặn thì giữ trong bộ nhớ): mất
+  khi đóng tab, không lưu `localStorage`, cookie hay URL, không ghi ra console, không đặt vào
+  thuộc tính DOM. Chỉ `js/admin-token.js` đọc/ghi token; `api.js` nhận token qua tham số.
+- Token chỉ được gửi trong header của request admin. Request công khai (`GET /sources`,
+  `/articles`, `/ai/topics`) không kèm token. Chưa có token thì mọi nút ghi bị khóa và không có
+  request admin nào được gửi.
+- Không có endpoint kiểm tra token, nên trạng thái "Token verified" chỉ có sau một lệnh admin
+  thành công. 401 → "The admin token was rejected. Enter it again." và mở lại ô nhập;
+  503 → "The server has no admin token configured."
+- Ai mở được tab đó (hoặc chạy được script trong trang) đều đọc được token: đừng dùng trên máy
+  dùng chung hay khi trang có thể bị nhúng mã lạ.
+
+**Giới hạn đã biết**:
+- 4 thẻ số liệu chỉ có sau khi bấm Rescan (server không lưu lịch sử chạy). Kết quả lần cuối được
+  giữ trong `sessionStorage` của tab cùng thời điểm chạy.
+- **Xóa nguồn xóa luôn toàn bộ bài của nguồn đó** (cascade), không hoàn tác được.
+- Rescan chạy đồng bộ, có thể mất vài phút (timeout phía trình duyệt 180 s,
+  `RESCAN_TIMEOUT_MS`). Hết thời gian chờ không có nghĩa là thất bại: server có thể vẫn đang chạy.
+- Hai lần Rescan cùng lúc (hai tab, hai người) không bị khóa và có thể ghi đè trạng thái đồng bộ
+  của nhau.
+- "Latest classified articles" sắp theo ngày xuất bản (`published_at`), không theo thời điểm
+  phân loại.
+- Nguồn mới chỉ được kiểm tra feed ở lần Rescan sau ("The feed is checked the next time sources
+  are rescanned."); form chỉ thêm nguồn RSS/Atom.
+
+- **Hash route**: `#/search` (mặc định), `#/topics`, `#/sources`. Hash lạ quay về Search. Topics
+  hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.
+- **CSP** (`app/core/security_headers.py`, chỉ trên `/` và `/static/...`):
+  `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';
+  connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'`.
+  Không `'unsafe-inline'`/`'unsafe-eval'`, nên mọi script và style phải nằm trong file. Style động
+  (nếu cần) chỉ đặt bằng `element.style.setProperty`, không `setAttribute("style")`.
+- **Render an toàn**: chữ từ API chỉ vào DOM qua `textContent`/text node (`el()` trong
+  `js/dom.js`). Không dùng `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+  `eval` (có test grep). Link bài báo đi qua `safeHref()` (chỉ nhận `http://`, `https://`, ngược
+  lại hiện chữ thường) và luôn có `target="_blank" rel="noopener noreferrer"`.
+- **Token admin**: chỉ trang Sources có ô nhập token (xem trên); `api.js` nhận token qua tham số,
+  không lưu.
+- **Timeout**: request thường chờ 20 s (`DEFAULT_TIMEOUT_MS`), search chờ 60 s
+  (`SEARCH_TIMEOUT_MS`), vì lần search đầu có thể phải chờ nạp model (xem "Nạp sẵn model").
+  Sau 5 s chưa có kết quả, trang hiện thêm dòng giải thích.
+- **Favicon**: `<link rel="icon" href="data:,">` (biểu tượng rỗng) để trình duyệt không gọi
+  `/favicon.ico`; favicon thật chưa làm.
+- **`/docs` cần Internet**: Swagger UI và ReDoc được tải từ CDN (jsdelivr). Trang web chính
+  không cần CDN.
+- Thời gian từ API không có hậu tố múi giờ được coi là UTC, hiển thị theo giờ Việt Nam; thiếu
+  hoặc sai thì hiện "Date unknown".
+
+## Danh sách endpoint
+
+Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
+
+| Method | Path | Auth | Ghi chú |
+|---|---|---|---|
+| GET | `/health` | public | `{"status": "ok"}` |
+| GET | `/sources` | public | `SourceRead`: `id`, `name`, `type`, `feed_url`, `query`, `language`, `is_active`, `created_at`, `last_synced_at`, `last_status`, `last_error` (xem "Trạng thái đồng bộ") |
+| POST | `/sources` | admin | `SourceCreate`; 201, 409 nếu trùng tên hoặc `feed_url` |
+| PATCH | `/sources/{source_id}` | admin | Body `{"is_active": bool}`; trả `SourceRead`, 404 nếu không có. Nguồn tắt bị ingestion bỏ qua |
+| DELETE | `/sources/{source_id}` | admin | 204; xóa luôn mọi bài của nguồn (cascade) |
+| POST | `/ingestion/run` | admin | Query `source_id` tùy chọn; trả `sources_processed`, `articles_seen`, `articles_created`, `duplicates_skipped`, `errors` |
+| GET | `/articles` | public | Query `topic`, `status`, `limit` (1-100), `offset`; trả `items`, `total`, `limit`, `offset` |
+| GET | `/articles/{article_id}` | public | `ArticleRead`: `id`, `source_id`, `source_name`, `title`, `url`, `author`, `content`, `summary`, `topic`, `confidence`, `status`, `published_at`, `created_at` |
+| GET | `/topics/trending` | public | Query `window_hours`, `baseline_days`, `min_articles`, `limit`; trả `topic`, `article_count`, `expected_count`, `trend_score` |
+| GET | `/topics/timeseries` | public | Query `days` (1-30, mặc định 7), `limit` (1-10, mặc định 3), `window_hours`, `baseline_days`, `min_articles` (như trending); trả `topic`, `trend_score`, `article_count`, `points[]` (`date` "YYYY-MM-DD" theo UTC, `count`). Xem "Chuỗi thời gian chủ đề" |
+| GET | `/ai/topics` | public | `id`, `label`, `size`, `keywords`, `representative_articles`, `updated_at` |
+| POST | `/ai/search` | public, rate limit | Body `{"input": "..."}`; `sources[]`: `id`, `title`, `url`, `source_name`, `topic`, `published_at`, `similarity`, `summary`, `summary_method` |
+| POST | `/ai/ask` | admin | Như `/ai/search` nhưng nhận link, gọi LLM và trả thêm `answer` |
+| POST | `/ai/process` | admin | 202 kèm job `id` |
+| GET | `/ai/process/{job_id}` | admin | Trạng thái job (`error` có thể chứa chi tiết nội bộ nên không public) |
 
 ## Luồng thử nhanh
 
@@ -88,10 +247,49 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
    trong `window_hours` gần nhất (mặc định 24) với mức bình thường của `baseline_days`
    ngày trước đó (mặc định 7); `trend_score` là số độ lệch chuẩn vượt mức bình thường.
 
+### Chuỗi thời gian chủ đề
+
+`GET /api/v1/topics/timeseries` trả số bài mỗi ngày của các chủ đề đang trending, cho biểu đồ.
+
+- Chọn chủ đề bằng chính `TrendingTopicsService` của `/topics/trending` (cùng `trend_score`,
+  cùng `window_hours`/`baseline_days`/`min_articles`), lấy `limit` chủ đề có `trend_score` cao
+  nhất, xếp giảm dần. Nhãn catch-all `Other` và `Other / Outlier` bị loại. Không có chủ đề nào
+  đủ điều kiện thì trả `[]`.
+- `trend_score` và `article_count` giống hệt `/topics/trending`: `article_count` là số bài trong
+  cửa sổ `window_hours`, không phải tổng các `points`.
+- `points`: đúng `days` ngày **UTC** liên tiếp, cũ nhất trước, kết thúc ở ngày UTC hiện tại.
+  Ngày không có bài vẫn có điểm với `count: 0` (zero-fill). Thời điểm của bài là
+  `published_at`, nếu thiếu thì `created_at` (như trending). Bài có `published_at` ở tương lai
+  (sau hôm nay theo UTC) không được đếm.
+- Đếm theo ngày bằng Python (không dùng hàm ngày riêng của SQLite/PostgreSQL), nên kết quả như
+  nhau trên hai DB. Một request chạy tối đa 2 truy vấn: một cho trending, một lấy
+  `(topic, thời điểm)` của các chủ đề đã chọn.
+- Giới hạn: đọc tối đa `TIMESERIES_MAX_ROWS` = 50.000 dòng mỗi request
+  (`app/services/topic_timeseries.py`), mới nhất trước. Nếu vượt, các ngày cũ nhất bị đếm thiếu.
+
 ### Loại nguồn: RSS/Atom và News API
 
 `POST /api/v1/ingestion/run?source_id=ID` thu thập bài mới từ source đã lưu; bỏ `source_id`
 sẽ chạy mọi nguồn active. Endpoint không nhận URL qua request body.
+
+#### Trạng thái đồng bộ
+
+Sau mỗi nguồn được chạy, ingestion ghi và commit ba cột của nguồn đó (migration
+`0007_source_sync_status`). Nguồn chưa từng chạy: cả ba là `null`. Nguồn tắt (`is_active=false`)
+không bị đọc feed và không bị cập nhật; chạy với `source_id` chỉ cập nhật nguồn đó.
+
+- `last_synced_at`: thời điểm (UTC) xử lý xong nguồn trong lần chạy gần nhất.
+- `last_status`:
+  - `error`: lần chạy gặp lỗi (tải hoặc parse feed thất bại, lỗi News API, lỗi lưu bài).
+  - `warning`: không lỗi nhưng feed không có bài nào (`articles_seen` của riêng nguồn = 0).
+  - `ok`: các trường hợp còn lại, kể cả khi mọi bài đều đã có (chỉ trùng).
+- `last_error`: chỉ có khi `error`. Là **thông điệp rút gọn** dạng `<LoạiLỗi>: <thông điệp cố định>`,
+  ví dụ `UnsupportedFeedError: Link returns HTML or another document, not RSS/Atom`,
+  `ReadTimeout: Request timed out`, `UnsafeFeedUrlError: Blocked non-public or unresolvable address`.
+  Không bao giờ chứa URL, hostname, IP, text gốc của exception hay stack trace, vì
+  `GET /sources` là public; tối đa 300 ký tự. Bảng ánh xạ ở `app/services/sync_errors.py`; loại lỗi
+  lạ ghi `Unexpected error`. Chi tiết đầy đủ vẫn có trong `errors` của response
+  `POST /ingestion/run` (admin).
 
 - `type: "rss"` (mặc định): đọc `feed_url`. `HttpUrl` chỉ kiểm tra cú pháp khi tạo source,
   không xác nhận nội dung là feed; trang HTML và URL bài viết đơn lẻ không được hỗ trợ.
@@ -169,7 +367,7 @@ DLL native của `hdbscan`; trong Docker module này chạy được. Lần ch�
 
 - `POST /api/v1/ai/process` xếp một job chạy nền và trả `202` kèm `id` ngay. `409` nếu
   chưa đủ bài (`AI_MIN_DOCUMENTS`) hoặc đang có job khác chạy; `503` nếu không nạp được thư viện ML.
-- `GET /api/v1/ai/process/{job_id}` trả `status` (`pending` → `running` → `succeeded` | `failed`),
+- `GET /api/v1/ai/process/{job_id}` (cần `X-Admin-Token`) trả `status` (`pending` → `running` → `succeeded` | `failed`),
   `error` khi thất bại và `result` khi thành công. `result` gồm số liệu batch,
   `confidence_method` (`hdbscan_soft` là điểm thật từ HDBSCAN; `fallback` là giá trị cố định 0.5)
   và `topic_coherence` (NPMI trung bình, -1..1, càng cao càng tốt — so sánh giữa các batch
@@ -186,6 +384,27 @@ DLL native của `hdbscan`; trong Docker module này chạy được. Lần ch�
 Trang `/` gọi `POST /api/v1/ai/search` (public, không cần token): chỉ tìm trong bài đã lưu,
 giới hạn 30 request/phút mỗi địa chỉ (`AI_SEARCH_RATE_PER_MINUTE`, vượt thì 429 kèm
 `Retry-After`), body tối đa 4096 byte (`AI_SEARCH_MAX_BODY_BYTES`), không nhận link (422).
+
+### Nạp sẵn model (`AI_PRELOAD_MODEL`)
+
+- Mặc định trong code là `false`; `.env.example` đặt `true`. Khi bật, lúc khởi động server
+  mở một thread nền để import code search (torch, sentence-transformers) rồi nạp model
+  embedding. Server **không chờ** việc này để nhận request, và nạp lỗi chỉ ghi log, không
+  làm server dừng; khi đó search vẫn trả 503 như cũ và lần search sau sẽ thử nạp lại.
+- Model chỉ được nạp một lần (`app/services/model_preload.py`). Request đến trong lúc đang
+  nạp sẽ chờ lần nạp đó, kể cả khi hai request đầu đến cùng lúc.
+- `GET /api/v1/health` có thêm `model_ready` (true/false). Trường này chỉ để thông tin:
+  health vẫn trả 200 `"status": "ok"` khi model chưa sẵn sàng.
+- **Giới hạn khi không bật preload:** lần search đầu sau khi khởi động phải chờ import và nạp
+  model. Đo trên máy dev (Windows 11, 16 CPU, Python 3.14, model
+  `paraphrase-multilingual-MiniLM-L12-v2` có sẵn trong cache, `HF_HUB_OFFLINE=1`), 3 lần
+  khởi động lại: lần đầu 28.0–28.3 s (import khoảng 25.8 s, nạp model khoảng 2.3 s), lần
+  sau 0.02–0.03 s, RAM tiến trình khoảng 1.25 GB sau khi nạp. Trang web chờ search tối đa
+  60 s và sau 5 s hiện dòng "The first search can take up to a minute while the model loads."
+- **Mạng:** model lấy từ cache Hugging Face (`~/.cache/huggingface`). Docker image không có
+  sẵn model, nên container tải ở lần chạy đầu. Máy không có mạng nên đặt `HF_HUB_OFFLINE=1`
+  khi model đã có trong cache. Không đặt thì thư viện thử kết nối lại nhiều lần, và trong
+  lần đo, lần nạp vẫn chưa xong sau hơn 2 phút. Model không có trong cache thì search trả 503.
 
 `POST /api/v1/ai/ask` với `{"input": "..."}` cần `X-Admin-Token`; nhận yêu cầu hoặc link bài báo.
 `ASK_ALLOW_LINKS` và `INGESTION_FULL_TEXT` mặc định `true` trong code nhưng `false` trong

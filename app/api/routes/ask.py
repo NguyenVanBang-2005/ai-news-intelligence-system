@@ -99,6 +99,7 @@ def _ask_source(source) -> AskSource:
         title=source.article.title,
         url=source.article.url,
         source_name=source.article.source.name,
+        topic=source.article.topic,
         published_at=source.article.published_at,
         similarity=round(source.similarity, 4),
         summary=source.summary,

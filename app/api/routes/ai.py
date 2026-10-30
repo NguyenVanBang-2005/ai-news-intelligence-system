@@ -90,8 +90,10 @@ def process_articles(
 @router.get(
     "/process/{job_id}",
     response_model=AIJobRead,
+    dependencies=[Depends(require_admin)],
 )
 def get_job(job_id: str, db: DbSession) -> AIJobRead:
+    """A job's status and result; admin only, since `error` may hold internal details."""
     job = AIJobRepository(db).get(job_id)
 
     if job is None:

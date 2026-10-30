@@ -267,7 +267,10 @@ def test_root_serves_the_search_page(client: TestClient) -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     # The public page uses the offline search; /ai/ask needs the admin token.
-    assert "/api/v1/ai/search" in response.text
+    # Its search code lives in a module since the B1 front-end.
+    search_module = client.get("/static/js/pages/search.js").text
+    assert "/api/v1/ai/search" in search_module
+    assert "/api/v1/ai/ask" not in search_module
 
 
 @pytest.mark.parametrize(
