@@ -56,9 +56,10 @@ MAX_OUTLIER_SHARE = 0.25
 # The real job on this database (275b6203...) gave 2 topics and 36 outliers.
 REFERENCE_TOPICS, REFERENCE_OUTLIERS, OUTLIER_TOLERANCE = 2, 36, 5
 
-# Robustness gate (DATA-3), fixed before it was run: GATE_CONFIG passes when at least
+# Robustness gate, fixed before it was run: the gate config passes when at least
 # GATE_MIN_PASSING_SEEDS of the UMAP seeds give 5-12 topics, largest topic <= 40% and
 # outliers <= 25%, and no small batch crashes. Small-batch numbers are only reported.
+# Defaults are the DATA-3 run; DATA-3b passes --gate-min-samples 1 and new --seeds.
 GATE_CONFIG = (8, 3)
 ALT_CONFIG = (8, 1)
 UMAP_SEEDS = (0, 1, 2, 3, 42)
@@ -185,8 +186,9 @@ def proposed_min_cluster_size(document_count: int) -> int:
     return max(2, min(8, document_count // 5))
 
 
-def proposed_min_samples(min_cluster_size: int) -> int:
-    return min(3, min_cluster_size)
+def proposed_min_samples(min_cluster_size: int, cap: int = 3) -> int:
+    """DATA-3 proposed min(3, mcs); DATA-3b uses cap=1, i.e. always 1."""
+    return min(cap, min_cluster_size)
 
 
 def meets_gate_criteria(result: RunResult) -> bool:
@@ -295,23 +297,23 @@ def run_config(
                      coherence, keywords, seconds, random_state)  # fmt: skip
 
 
-def run_seeds(documents: list[str], embeddings) -> list[RunResult]:
-    """GATE_CONFIG and ALT_CONFIG with every UMAP seed, on all documents."""
+def run_seeds(documents: list[str], embeddings, configs, seeds) -> list[RunResult]:
+    """Every (min_cluster_size, min_samples) config with every UMAP seed, on all documents."""
     results = []
-    for size, samples in (GATE_CONFIG, ALT_CONFIG):
-        for seed in UMAP_SEEDS:
+    for size, samples in configs:
+        for seed in seeds:
             result = run_config(documents, embeddings, size, samples, random_state=seed)
             print(f"({size},{samples}) seed={seed}: {result.topics_final} topics", flush=True)
             results.append(result)
     return results
 
 
-def run_small_batches(documents: list[str], embeddings) -> tuple[list, list[str]]:
+def run_small_batches(documents: list[str], embeddings, samples_cap: int = 3):
     """Random subsets with the proposed formula; crashes are collected, not raised."""
     rows, errors = [], []
     for size in SMALL_BATCH_SIZES:
         cluster_size = proposed_min_cluster_size(size)
-        samples = proposed_min_samples(cluster_size)
+        samples = proposed_min_samples(cluster_size, samples_cap)
         for seed in SUBSET_SEEDS:
             picked = subset_indices(len(documents), size, seed)
             try:
@@ -393,6 +395,10 @@ def seed_lines(seed_results: list[RunResult]) -> list[str]:
         config = f"({r.min_cluster_size},{r.min_samples})"
         ok = "yes" if meets_gate_criteria(r) else "no"
         lines.append(f"{config:>7} {r.random_state:>4} {metrics_cells(r)} {ok}")
+    lines += ["", "Top 5 keywords per topic"]
+    for r in seed_results:
+        lines.append(f"  ({r.min_cluster_size},{r.min_samples}) seed {r.random_state}")
+        lines += [f"    {topic}: {', '.join(words)}" for topic, words in r.keywords.items()]
     return lines
 
 
@@ -407,23 +413,31 @@ def batch_lines(batch_rows: list, errors: list[str]) -> list[str]:
     return lines
 
 
-def robustness_lines(seed_results: list[RunResult], batch_rows: list, errors: list[str]):
+def robustness_lines(seed_results, batch_rows, errors, gate_config=GATE_CONFIG):
     """Seed table, small-batch table and the gate verdict."""
-    gate_runs = [r for r in seed_results if (r.min_cluster_size, r.min_samples) == GATE_CONFIG]
+    gate_runs = [r for r in seed_results if (r.min_cluster_size, r.min_samples) == gate_config]
     passing = sum(meets_gate_criteria(r) for r in gate_runs)
     verdict = "PASSES" if gate_passes(gate_runs, errors) else "DOES NOT PASS"
     return (
         seed_lines(seed_results)
-        + ["", f"{GATE_CONFIG}: {passing}/{len(gate_runs)} seeds meet the criteria "
+        + ["", f"{gate_config}: {passing}/{len(gate_runs)} seeds meet the criteria "
                f"(needed: {GATE_MIN_PASSING_SEEDS})", ""]  # fmt: skip
         + batch_lines(batch_rows, errors)
-        + ["", f"Gate verdict: {GATE_CONFIG} {verdict}"]
+        + ["", f"Gate verdict: {gate_config} {verdict}"]
     )
 
 
-def write_lines(out: Path, lines: list[str]) -> None:
+def write_lines(out: Path, lines: list[str], append: bool = False) -> None:
+    """Write the lines to `out`; with append, add them after a blank line instead."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    text = "\n".join(lines) + "\n"
+    if append and out.exists():
+        text = out.read_text(encoding="utf-8") + "\n" + text
+    out.write_text(text, encoding="utf-8")
+
+
+def parse_seeds(text: str) -> list[int]:
+    return [int(part) for part in text.split(",") if part.strip()]
 
 
 def parse_args() -> argparse.Namespace:
@@ -436,6 +450,16 @@ def parse_args() -> argparse.Namespace:
                         help="run the DATA-3 robustness gate instead of the grid")  # fmt: skip
     parser.add_argument("--robustness-out", type=Path,
                         default=Path("docs/evidence/topic_robustness.txt"))  # fmt: skip
+    parser.add_argument("--gate-min-samples", type=int, default=GATE_CONFIG[1],
+                        help="min_samples of the gate config (min_cluster_size is 8)")
+    parser.add_argument("--compare-min-samples", default=str(ALT_CONFIG[1]),
+                        help="min_samples of a comparison config, or 'none' for no comparison")
+    parser.add_argument("--seeds", type=parse_seeds, default=list(UMAP_SEEDS),
+                        help="UMAP seeds, e.g. 5,6,7,8,9")
+    parser.add_argument("--append", action="store_true",
+                        help="add a section to --robustness-out instead of replacing it")
+    parser.add_argument("--section", default="Topic robustness gate (DATA-3, read-only)",
+                        help="title line of the robustness section")
     return parser.parse_args()
 
 
@@ -455,6 +479,19 @@ def run_grid(documents: list[str], embeddings) -> list[RunResult] | None:
     return sorted(results, key=lambda r: (r.min_cluster_size, r.min_samples or 99))
 
 
+def run_robustness(args: argparse.Namespace, documents: list[str], embeddings, info) -> None:
+    """Seeds on all documents, then small batches; the verdict goes to --robustness-out."""
+    gate_config = (GATE_CONFIG[0], args.gate_min_samples)
+    configs = [gate_config]
+    if args.compare_min_samples.lower() != "none":
+        configs.append((GATE_CONFIG[0], int(args.compare_min_samples)))
+    seed_results = run_seeds(documents, embeddings, configs, args.seeds)
+    batch_rows, errors = run_small_batches(documents, embeddings, args.gate_min_samples)
+    lines = robustness_lines(seed_results, batch_rows, errors, gate_config)
+    write_lines(args.robustness_out, info + [""] + lines, append=args.append)
+    print("\n".join(lines))
+
+
 def main() -> None:
     args = parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # make `app` importable
@@ -468,13 +505,8 @@ def main() -> None:
     print(f"Documents: {len(documents)}; {cache_note}", flush=True)
     model_name = settings.embedding_model_name
     if args.robustness:
-        seed_results = run_seeds(documents, embeddings)
-        batch_rows, errors = run_small_batches(documents, embeddings)
-        lines = robustness_lines(seed_results, batch_rows, errors)
-        title = "Topic robustness gate (DATA-3, read-only)"
-        write_lines(args.robustness_out,
-                    run_info(title, model_name, len(documents), cache_note) + [""] + lines)
-        print("\n".join(lines))
+        info = run_info(args.section, model_name, len(documents), cache_note)
+        run_robustness(args, documents, embeddings, info)
         return
     results = run_grid(documents, embeddings)
     if results is None:

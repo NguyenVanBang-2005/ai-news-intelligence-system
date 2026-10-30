@@ -13,12 +13,14 @@ from scripts.experiment_topics import (
     largest_topic_size,
     meets_criteria,
     meets_gate_criteria,
+    parse_seeds,
     pick_best,
     proposed_min_cluster_size,
     proposed_min_samples,
     reproduces_reference,
     subset_indices,
     write_csv,
+    write_lines,
 )
 
 
@@ -98,3 +100,15 @@ def test_subset_indices_are_reproducible_sorted_and_unique() -> None:
     assert first == subset_indices(200, 50, seed=1)
     assert first == sorted(set(first)) and len(first) == 50
     assert first != subset_indices(200, 50, seed=2)
+
+
+def test_min_samples_cap_for_data_3b() -> None:
+    assert [proposed_min_samples(s, cap=1) for s in (2, 8)] == [1, 1]
+
+
+def test_parse_seeds_and_append(tmp_path: Path) -> None:
+    assert parse_seeds("5,6, 7,") == [5, 6, 7]
+    out = tmp_path / "robustness.txt"
+    write_lines(out, ["DATA-3"])
+    write_lines(out, ["DATA-3b"], append=True)
+    assert out.read_text(encoding="utf-8") == "DATA-3\n\nDATA-3b\n"
