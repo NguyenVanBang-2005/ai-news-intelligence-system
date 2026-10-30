@@ -1,0 +1,174 @@
+Topic parameter experiment (HDBSCAN grid on the DATA-1 corpus, read-only)
+Date (UTC): 2026-10-30 03:40
+Commit: be7a0b0
+Python: 3.14.7
+Command: python scripts/experiment_topics.py --db local-data/ainis_eval.db --csv-out local-data/topic_experiment.csv --table-out docs/evidence/topic_param_experiment.txt
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (HF_HUB_OFFLINE=1); documents: 200
+Embedding check against the vectors cached by the real job: 200 compared, max abs difference 0.0
+Criteria (fixed beforehand, on final values): 5-12 topics, largest topic <= 40%, outliers <= 25%; best = highest topic_coherence (NPMI)
+Columns: topics/outliers as before reduce_outliers > after > final (after merge);
+         outl% and big% are shares of all documents (final).
+
+mcs   min_s  topics b>a>f  outliers b>a>f  outl%   big%    npmi  ok   sec
+-------------------------------------------------------------------------
+  3       1      28>28>28        24>24>24   12.0    6.5 -0.2060  no  29.8
+  3       3      18>18>18        48>48>48   24.0    9.5 -0.1657  no  20.8
+  3 default      18>18>18        48>48>48   24.0    9.5 -0.1657  no  20.7
+  5       1      17>17>17        38>38>38   19.0    7.0 -0.1782  no  19.9
+  5       3      16>16>16        46>46>46   23.0   10.5 -0.1398  no  19.5
+  5 default      11>11>11        62>61>61   30.5   13.0 -0.0926  no  14.0
+  8       1      10>10>10        35>35>35   17.5   13.5 -0.0837 yes  12.8
+  8       3         7>7>7        29>29>29   14.5   36.0 -0.0213 yes  10.1
+  8 default         2>2>2        22>22>22   11.0   82.5  0.2396  no   3.5
+ 10       1         2>2>2           0>0>0    0.0   93.5  0.1768  no   1.9
+ 10       3         2>2>2           0>0>0    0.0   93.5  0.1768  no   1.9
+ 10 default         2>2>2        36>36>36   18.0   76.0  0.2461  no  14.7
+
+Top 5 keywords per final topic
+  mcs=3 min_samples=1
+    0: investors, stock market, enterprise, anthropic said, said anthropic
+    1: technology, intelligence, transformers, plastic, 3d
+    2: mit libraries, mit, lincoln laboratory, mit america, mit reads
+    3: microsoft ai, salesforce, microsoft, ai powered, automation
+    4: game, ai, agent, app, malicious
+    5: warming, climate, emissions, data centers, forecasts
+    6: academic humanizer, researchers, humanizer, research, academic
+    7: elon musk, elon, musk, ai, genius
+    8: tech industry, industrial intelligence, tech workers, innovation, tech
+    9: google ai, google, foreign robots, robots, robot
+    10: voice ai, chatgpt, developers, ai generated, open source
+    11: billion revenue, microsoft cloud, microsoft reported, quarter microsoft, cloud business
+    12: drones, drone, mit students, computer science, ai psychic
+    13: php scare, hackers, hack binance, novel vulnerabilities, hack
+    14: artificial neural, neural networks, neural network, neural, artificial
+    15: google gemini, google cloud, launches gemini, gemini models, gemini carbon
+    16: apple intelligence, apple music, apple, apple rolled, apple just
+    17: ai agents, mit technology, agent frameworks, agents, technology review
+    18: enterprise, autopilot jobhunt, using ai, agents, assistants
+    19: industry ombudsman, ai bots, digital duty, industry, companies
+    20: bots teams, bossware, teams meetings, workplace monitoring, teams facilitator
+    21: biosecurity lab, approach ai, ai biosecurity, enterprise, biosecurity
+    22: social media, media platforms, search traffic, media feeds, facebook
+    23: google, google cloud, google chief, search advertising, schindler google
+    24: monitor wildfire, park tech, pokémon world, wildfire, visits cairngorms
+    25: making vaccines, rna vaccines, ai, researchers, vaccine
+    26: algorithmic monoculture, use ai, intellectual, algorithmic, hiring algorithms
+    27: openclaw foundation, open source, cloud sessions, announcement openclaw, shared cloud
+  mcs=3 min_samples=3
+    0: artificial, machines, technology, scientists, transformers
+    1: investors, stock market, enterprise, anthropic said, anthropic
+    2: data centers, data centres, data centre, climate, warming
+    3: microsoft ai, salesforce, microsoft, ai powered, automation
+    4: mit libraries, mit, innovation fellow, mit reads, mit america
+    5: revenue microsoft, cloud revenue, microsoft reported, quarter microsoft, microsoft cloud
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: game, ai, agent, app, malicious
+    8: elon musk, elon, musk, real genius, nolan odyssey
+    9: agent frameworks, ai agents, mit technology, agents, agent
+    10: academic humanizer, humanizer, using ai, ai generated, use ai
+    11: voice ai, ai generated, voice video, software development, developers
+    12: tech industry, tech workers, tech, technology, technologies
+    13: autopilot jobhunt, enterprise, ai agents, agents, assistants
+    14: google said, google ai, google, ads, gmail
+    15: google gemini, google cloud, launches gemini, gemini models, gemini carbon
+    16: apple intelligence, apple music, apple, apple rolled, apple just
+    17: intelligence, entrepreneur, entrepreneurs, entrepreneurship, mit students
+  mcs=3 min_samples=default
+    0: artificial, machines, technology, scientists, transformers
+    1: investors, stock market, enterprise, anthropic said, anthropic
+    2: data centers, data centres, data centre, climate, warming
+    3: microsoft ai, salesforce, microsoft, ai powered, automation
+    4: mit libraries, mit, innovation fellow, mit reads, mit america
+    5: revenue microsoft, cloud revenue, microsoft reported, quarter microsoft, microsoft cloud
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: game, ai, agent, app, malicious
+    8: elon musk, elon, musk, real genius, nolan odyssey
+    9: agent frameworks, ai agents, mit technology, agents, agent
+    10: academic humanizer, humanizer, using ai, ai generated, use ai
+    11: voice ai, ai generated, voice video, software development, developers
+    12: tech industry, tech workers, tech, technology, technologies
+    13: autopilot jobhunt, enterprise, ai agents, agents, assistants
+    14: google said, google ai, google, ads, gmail
+    15: google gemini, google cloud, launches gemini, gemini models, gemini carbon
+    16: apple intelligence, apple music, apple, apple rolled, apple just
+    17: intelligence, entrepreneur, entrepreneurs, entrepreneurship, mit students
+  mcs=5 min_samples=1
+    0: cloud revenue, google cloud, billion revenue, microsoft, cloud business
+    1: mit, lincoln laboratory, mit america, mit reads, innovation
+    2: investors, stock market, enterprise, anthropic said, anthropic
+    3: technology, intelligence, transformers, plastic, 3d
+    4: game, vaccines, ai, malicious, app
+    5: data centers, data centres, data centre, data center, climate
+    6: researchers, using ai, research, use ai, humanizer
+    7: microsoft ai, salesforce, microsoft, ai powered, automation
+    8: hack binance, hack, vulnerabilities, internet, crypto
+    9: elon musk, elon, musk, real genius, nolan odyssey
+    10: google ai, google, foreign robots, robots, robot
+    11: tech industry, industrial intelligence, tech workers, innovation, tech
+    12: agent frameworks, ai agents, mit technology, agents, agent
+    13: voice ai, vibe coders, voice video, chatgpt, developers
+    14: intelligence, drones, drone, mit students, computer science
+    15: google gemini, google cloud, launches gemini, gemini models, gemini carbon
+    16: artificial neural, neural networks, neural network, neural, artificial
+  mcs=5 min_samples=3
+    0: mit, artificial intelligence, innovation, mit america, intelligence
+    1: artificial, machines, technology, scientists, transformers
+    2: investors, stock market, enterprise, anthropic said, anthropic
+    3: data centers, data centres, data centre, climate, warming
+    4: microsoft ai, salesforce, microsoft, ai powered, automation
+    5: revenue microsoft, cloud revenue, microsoft reported, quarter microsoft, microsoft cloud
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: elon musk, elon, musk, real genius, ai
+    8: game, ai, agent, app, malicious
+    9: academic humanizer, humanizer, using ai, ai generated, use ai
+    10: agent frameworks, ai agents, mit technology, agents, agent
+    11: voice ai, ai generated, voice video, software development, developers
+    12: tech industry, tech workers, tech, technology, technologies
+    13: enterprise, ai agents, agents, assistants, hiring
+    14: google gemini, google cloud, launches gemini, gemini models, gemini carbon
+    15: google said, google ai, google, ads, gmail
+  mcs=5 min_samples=default
+    0: artificial, machines, technology, transformers, intelligence
+    1: mit, artificial intelligence, innovation, mit america, intelligence
+    2: google ai, google, amazon, microsoft, robots
+    3: ai generated, game, ai, ai assisted, malicious
+    4: investors, stock market, stock, enterprise, market
+    5: salesforce, microsoft, ai powered, automation, enterprise
+    6: hack binance, hack, vulnerabilities, internet, crypto
+    7: elon musk, elon, musk, nolan odyssey, ai
+    8: warming, climate, emissions, data centers, forecasts
+    9: mit technology, open source, technology review, ai models, ai
+    10: academic humanizer, humanizer, researchers, research, accountability
+  mcs=8 min_samples=1
+    0: salesforce, microsoft, enterprise, ai, agents
+    1: artificial intelligence, artificial, machines, technology, transformers
+    2: mit, artificial intelligence, innovation, mit america, intelligence
+    3: google ai, google, amazon, microsoft, robots
+    4: game, vaccines, ai, malicious, app
+    5: investors, stock market, stock, enterprise, market
+    6: researchers, using ai, research, use ai, humanizer
+    7: data centers, data centres, data centre, data center, climate
+    8: hack binance, hack, vulnerabilities, internet, crypto
+    9: elon musk, elon, musk, ai, genius
+  mcs=8 min_samples=3
+    0: google, amazon, microsoft, cloud, ai
+    1: artificial intelligence, artificial, intelligence, technology, tech
+    2: mit, artificial intelligence, innovation, mit america, intelligence
+    3: investors, stock market, stock, enterprise, market
+    4: data centers, data centres, data centre, climate, warming
+    5: hack binance, hack, vulnerabilities, internet, crypto
+    6: elon musk, elon, musk, ai, genius
+  mcs=8 min_samples=default
+    0: intelligence, tech, technology, researchers, ai
+    1: investors, stock market, stock, enterprise, market
+  mcs=10 min_samples=1
+    0: intelligence, ai, tech, technology, artificial
+    1: investors, stock market, stock, enterprise, market
+  mcs=10 min_samples=3
+    0: intelligence, ai, tech, technology, artificial
+    1: investors, stock market, stock, enterprise, market
+  mcs=10 min_samples=default
+    0: intelligence, tech, technology, researchers, ai
+    1: investors, stock, enterprise, market, anthropic said
+
+Result: best = min_cluster_size=8, min_samples=3 (coherence -0.0213)
