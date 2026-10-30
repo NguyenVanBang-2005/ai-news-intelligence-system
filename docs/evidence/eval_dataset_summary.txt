@@ -1,0 +1,96 @@
+Evaluation dataset summary (real RSS corpus, local SQLite, read-only statistics)
+Date (UTC): 2026-10-30 03:09
+Branch/commit: data/corpus-eval @ f30065e (scripts and docs of this step uncommitted)
+Python: 3.14.7 (host venv, no Docker)
+Database: SQLite local-data/ainis_eval.db (gitignored), alembic upgrade head -> 0007_source_sync_status
+API run: uvicorn app.main:app --port 8021 with DATABASE_URL=sqlite:///./local-data/ainis_eval.db,
+         HF_HUB_OFFLINE=1, AI_PRELOAD_MODEL=true, INGESTION_FULL_TEXT=true,
+         ADMIN_API_TOKEN random per session (not recorded). MAX_FEED_ITEMS=50 (from .env).
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (EMBEDDING_MODEL_NAME in .env)
+AI settings: AI_BATCH_SIZE=500, AI_MIN_DOCUMENTS=10, DUPLICATE_SIMILARITY_THRESHOLD=0.92 (.env);
+             AI_OUTLIER_MIN_SIMILARITY=0.75, AI_TOPIC_MATCH_THRESHOLD=0.9, AI_ZEROSHOT_TOPICS empty (defaults)
+
+Topic model parameters (app/services/topic_model.py, values for this 200-document batch)
+  UMAP:     n_neighbors=15, n_components=5, min_dist=0.0, metric=cosine, random_state=42
+  HDBSCAN:  min_cluster_size=10 (max(2, min(10, n // 5))), min_samples=library default,
+            metric=euclidean, cluster_selection_method=eom, prediction_data=True
+  Vectorizer: CountVectorizer(stop_words=english, ngram_range=(1, 2), min_df=1)
+  Representation: KeyBERTInspired -> MaximalMarginalRelevance(diversity=0.3), top_n_words=20
+  BERTopic: calculate_probabilities=True; min_topic_size and nr_topics not set
+  Outliers: reduce_outliers(strategy=embeddings, threshold=0.75)
+  Merging:  reduce_topics(nr_topics=auto) only when a batch has >= 3 topics
+
+Sources added (POST /sources, all 201)
+  MIT Technology Review  https://www.technologyreview.com/feed/                              ok, 10 articles
+  The Verge AI           https://www.theverge.com/rss/ai-artificial-intelligence/index.xml   ok, 10 articles
+  VentureBeat AI         https://venturebeat.com/category/ai/feed/                           error: HTTP 429 (Vercel Security Checkpoint page)
+  BBC Technology         https://feeds.bbci.co.uk/news/technology/rss.xml                    ok, 20 articles
+  AI News                https://www.artificialintelligence-news.com/feed/                   error: HTTP 202 text/html (SiteGround captcha page)
+  Added because the corpus was below 150:
+  TechCrunch AI          https://techcrunch.com/category/artificial-intelligence/feed/       ok, 20 articles
+  Ars Technica AI        https://arstechnica.com/ai/feed/                                    ok, 20 articles
+  MIT News AI            https://news.mit.edu/rss/topic/artificial-intelligence2             ok, 50 articles
+  Guardian AI            https://www.theguardian.com/technology/artificialintelligenceai/rss ok, 20 articles
+  The Register AI/ML     https://www.theregister.com/software/ai_ml/headlines.atom           ok, 50 articles
+
+Feeds blocked by bot protection (skipped, no code change):
+  VentureBeat AI: HTTP 429, Vercel Security Checkpoint page (venturebeat.com/feed/ also 429)
+  AI News:        HTTP 202 text/html, SiteGround captcha page instead of the RSS feed
+
+POST /ingestion/run (sources_processed / articles_seen / articles_created / duplicates_skipped)
+  run 1 (5 sources):  5 / 40 / 40 / 0      errors: AI News, VentureBeat AI (above)
+  run 2 (10 sources): 10 / 200 / 160 / 40  errors: same 2
+  run 3 (10 sources): 10 / 200 / 0 / 200   errors: same 2  -> dedup confirmed
+
+POST /ai/process {} -> job 275b6203-e2ff-4d43-953e-46db91c5d713
+  status succeeded; started 03:08:42Z, finished 03:09:01Z (~19 s, model already preloaded)
+  documents_received 200, unique_documents 200, semantic_duplicates 0, topics_created 2,
+  articles_updated 200, confidence_method hdbscan_soft, topic_coherence 0.2461
+  uvicorn process peak working set (whole process lifetime): ~1.7 GB
+
+Statistics command:
+  python scripts/corpus_stats.py --db local-data/ainis_eval.db   (read-only; output below)
+
+Total articles: 200
+Outliers (Other / Outlier): 36 (18.0%)
+
+Articles by source
+------------------
+source                 last_status  articles
+---------------------  -----------  --------
+MIT Technology Review  ok           10
+The Verge AI           ok           10
+VentureBeat AI         error        0
+BBC Technology         ok           20
+AI News                error        0
+TechCrunch AI          ok           20
+Ars Technica AI        ok           20
+MIT News AI            ok           50
+Guardian AI            ok           20
+The Register AI/ML     ok           50
+
+Articles by topic (articles.topic)
+----------------------------------
+topic                                           articles  share
+----------------------------------------------  --------  -----
+intelligence · tech · technology · researchers  152       76.0%
+Other / Outlier                                 36        18.0%
+investors · stock · enterprise · market         12        6.0%
+
+Stored topics (topics table)
+----------------------------
+id  label                                           article_count  top 5 keywords
+--  ----------------------------------------------  -------------  ----------------------------------------------------
+1   intelligence · tech · technology · researchers  152            intelligence, tech, technology, researchers, ai
+2   investors · stock · enterprise · market         12             investors, stock, enterprise, market, anthropic said
+
+Content and dates
+-----------------
+metric                         value
+-----------------------------  ---------------
+with published_at              200
+without published_at           0
+median content length (chars)  4004
+status missing_content         0
+status breakdown               ai_analyzed=200
+

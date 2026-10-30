@@ -1,3 +1,5 @@
+SUPERSEDED by eval_dataset_summary.txt; the export script was rewritten on 2026-10-30.
+
 Corpus export for manual labeling (read-only)
 Date (UTC): 2026-10-27
 Base commit: e9a6aaa (scripts/export_corpus.py and tests/test_export_corpus.py uncommitted)
