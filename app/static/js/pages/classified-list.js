@@ -3,7 +3,7 @@
 // article drawer of the Search page.
 
 import { request } from "../api.js";
-import { badge, emptyState, errorMessage, loading } from "../components.js";
+import { badge, emptyState, errorMessage, loading, progressBar } from "../components.js";
 import { el } from "../dom.js";
 import { formatPercent } from "../format.js";
 import { openArticle } from "./article-drawer.js";
@@ -130,8 +130,9 @@ function articleRow(article, index) {
 
 function confidenceMeter(confidence) {
   if (!Number.isFinite(confidence)) return el("span", { className: "classified-confidence" });
-  const bar = el("span", { className: "meter meter-success" }, el("span", { className: "meter-fill" }));
-  bar.style.setProperty("--bar", formatPercent(confidence));
+  const bar = progressBar(confidence, {
+    className: "meter meter-success", label: `Classification confidence ${formatPercent(confidence)}`,
+  });
   return el("div", { className: "classified-confidence" }, [
     el("span", { className: "confidence-label", text: `Confidence ${formatPercent(confidence)}` }), bar,
   ]);

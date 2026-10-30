@@ -61,6 +61,17 @@ export function badge(text, tone = "neutral") {
   return el("span", { className: `badge badge-${tone}`, text });
 }
 
+/**
+ * A thin bar for a value from 0 to `max`, drawn by <progress>, so no style is set from code.
+ * Without a `label` the bar is decorative (the number is shown as text next to it).
+ */
+export function progressBar(value, { max = 1, label = null, className = "meter" } = {}) {
+  const clamped = Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : 0;
+  return el("progress", {
+    className, value: clamped, max, "aria-label": label, "aria-hidden": label ? null : "true",
+  });
+}
+
 export function card(children, className = "") {
   return el("div", { className: `card ${className}`.trim() }, children);
 }

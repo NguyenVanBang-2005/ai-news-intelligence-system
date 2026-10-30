@@ -6,10 +6,14 @@ export const UNKNOWN_DATE = "Date unknown";
 const HAS_TIME_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-const dateTimeFormat = new Intl.DateTimeFormat("en-GB", {
+// Fixed month names: browsers' ICU data differ (some write "Sept" for September).
+export const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Numeric parts only; the month name comes from MONTH_NAMES.
+const dateTimeParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: DISPLAY_TIME_ZONE,
   day: "2-digit",
-  month: "short",
+  month: "numeric",
   year: "numeric",
   hour: "2-digit",
   minute: "2-digit",
@@ -32,7 +36,17 @@ export function parseApiDate(value) {
 /** For example "26 Oct 2026, 16:00 GMT+7"; "Date unknown" for null or invalid input. */
 export function formatDateTime(value) {
   const date = parseApiDate(value);
-  return date ? dateTimeFormat.format(date) : UNKNOWN_DATE;
+  if (!date) return UNKNOWN_DATE;
+  const part = Object.fromEntries(dateTimeParts.formatToParts(date).map(({ type, value: text }) => [type, text]));
+  const month = MONTH_NAMES[Number(part.month) - 1];
+  return `${part.day} ${month} ${part.year}, ${part.hour}:${part.minute} ${part.timeZoneName}`;
+}
+
+/** A UTC calendar day "2026-10-24" as "Oct 24"; null if it is not such a day. */
+export function formatShortDay(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
+  const month = match ? MONTH_NAMES[Number(match[2]) - 1] : undefined;
+  return month ? `${month} ${Number(match[3])}` : null;
 }
 
 /** For example "1,284". */

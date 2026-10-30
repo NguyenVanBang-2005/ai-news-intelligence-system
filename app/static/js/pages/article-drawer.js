@@ -1,7 +1,7 @@
 // Article details in the drawer, read from GET /api/v1/articles/{id}.
 
 import { request } from "../api.js";
-import { badge, loading } from "../components.js";
+import { badge, loading, progressBar } from "../components.js";
 import { appendChildren, el, externalLink, safeHref } from "../dom.js";
 import { openDrawer } from "../drawer.js";
 import { formatDateTime, formatPercent } from "../format.js";
@@ -97,8 +97,9 @@ function classificationCard(article) {
     el("span", { text: "Topic" }), el("strong", { text: article.topic || "Not classified yet" }),
   ])];
   if (Number.isFinite(article.confidence)) {
-    const bar = el("div", { className: "meter" }, el("span", { className: "meter-fill" }));
-    bar.style.setProperty("--bar", formatPercent(article.confidence));
+    const bar = progressBar(article.confidence, {
+      label: `Classification confidence ${formatPercent(article.confidence)}`,
+    });
     rows.push(el("div", { className: "classification-row" }, [
       el("span", { text: "Classification confidence" }),
       el("strong", { text: formatPercent(article.confidence) }),

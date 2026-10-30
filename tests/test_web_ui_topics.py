@@ -6,6 +6,7 @@ File reads and TestClient requests only; no browser and no Node.
 import re
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -31,11 +32,16 @@ def test_topics_route_shows_the_topics_page() -> None:
     assert "comingSoon" not in app_js
 
 
-def test_topic_modules_never_touch_element_style() -> None:
-    for name in TOPIC_MODULES:
-        source = read_page(name)
-        assert ".style" not in source, name
-        assert "style=" not in source, name
+ALL_JS = sorted((STATIC_DIR / "js").rglob("*.js")) + [STATIC_DIR / "app.js"]
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
+def test_no_script_touches_element_style(path) -> None:
+    # Bars are <progress> elements and the chart uses SVG attributes, so no file needs it.
+    source = path.read_text(encoding="utf-8")
+
+    assert ".style" not in source, path.name
+    assert "style=" not in source, path.name
 
 
 def test_topic_modules_load_nothing_from_other_origins() -> None:

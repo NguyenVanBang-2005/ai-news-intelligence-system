@@ -1,6 +1,6 @@
 // Trending chips under the search box and the "Trending topics" sidebar.
 
-import { loading } from "../components.js";
+import { loading, progressBar } from "../components.js";
 import { el } from "../dom.js";
 import { formatCount, formatScore } from "../format.js";
 import { TRENDING_PARAMS } from "../trending.js";
@@ -56,9 +56,8 @@ function strongestFirst(topics) {
 function trendList(topics, onPick) {
   const top = Math.max(...topics.map((item) => item.trend_score), 0);
   return el("ol", { className: "trend-list" }, topics.map((item, index) => {
-    const bar = el("span", { className: "trend-bar" }, el("span", { className: "trend-bar-fill" }));
     const share = top > 0 ? Math.max(0, item.trend_score) / top : 0;
-    bar.style.setProperty("--bar", `${(share * 100).toFixed(1)}%`);
+    const bar = progressBar(share, { className: "trend-bar" }); // decorative: the score is shown
     const count = `${formatCount(item.article_count)} article${item.article_count === 1 ? "" : "s"}`;
     return el("li", {}, el("button", {
       className: "trend-item", type: "button", onclick: () => onPick(item.topic),
