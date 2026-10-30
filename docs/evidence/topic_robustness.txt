@@ -1,0 +1,34 @@
+Topic robustness gate (DATA-3, read-only)
+Date (UTC): 2026-10-30 03:55
+Commit: a60d041
+Python: 3.14.7
+Command: python scripts/experiment_topics.py --robustness --db local-data/ainis_eval.db --robustness-out docs/evidence/topic_robustness.txt
+Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (HF_HUB_OFFLINE=1); documents: 200
+Embedding check against the vectors cached by the real job: 200 compared, max abs difference 0.0
+
+UMAP seeds, all documents (ok = 5-12 topics, big <= 40%, outliers <= 25%)
+ config seed topics  outl%   big%    npmi ok
+  (8,3)    0      3    0.5   89.0  0.1260 no
+  (8,3)    1      5    8.5   66.5 -0.0139 no
+  (8,3)    2      4    8.5   77.5 -0.0381 no
+  (8,3)    3      8   16.5   22.5 -0.0382 yes
+  (8,3)   42      7   14.5   36.0 -0.0213 yes
+  (8,1)    0     10   16.0   16.5 -0.0467 yes
+  (8,1)    1     10   14.5   20.5 -0.0408 yes
+  (8,1)    2     11   27.5   12.0 -0.0989 no
+  (8,1)    3     11   17.5   19.5 -0.0720 yes
+  (8,1)   42     10   17.5   13.5 -0.0837 yes
+
+(8, 3): 2/5 seeds meet the criteria (needed: 4)
+
+Small batches, proposed formula, UMAP seed 42 (reported only)
+   n subset mcs min_s topics  outl%   big%    npmi
+  50      1   8     3      2   22.0   52.0 -0.1634
+  50      2   8     3      2   62.0   22.0  0.0873
+  50      3   8     3      4   22.0   24.0 -0.0555
+ 100      1   8     3      2   26.0   37.0  0.1477
+ 100      2   8     3      2    3.0   89.0 -0.0833
+ 100      3   8     3      5   18.0   23.0  0.0541
+Small-batch errors: none
+
+Gate verdict: (8, 3) DOES NOT PASS

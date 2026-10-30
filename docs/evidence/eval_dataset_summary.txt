@@ -77,6 +77,23 @@ intelligence · tech · technology · researchers  152       76.0%
 Other / Outlier                                 36        18.0%
 investors · stock · enterprise · market         12        6.0%
 
+Articles by source x topic
+--------------------------
+source                 T1   T2  T3  total
+---------------------  ---  --  --  -----
+Ars Technica AI        9    10  1   20
+BBC Technology         12   6   2   20
+Guardian AI            11   8   1   20
+MIT News AI            50   0   0   50
+MIT Technology Review  7    1   2   10
+TechCrunch AI          14   5   1   20
+The Register AI/ML     43   4   3   50
+The Verge AI           6    2   2   10
+total                  152  36  12  200
+  T1 = intelligence · tech · technology · researchers
+  T2 = Other / Outlier
+  T3 = investors · stock · enterprise · market
+
 Stored topics (topics table)
 ----------------------------
 id  label                                           article_count  top 5 keywords

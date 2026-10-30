@@ -49,6 +49,29 @@ def by_topic(db: sqlite3.Connection, total: int) -> str:
     return table("Articles by topic (articles.topic)", ["topic", "articles", "share"], shown)
 
 
+def source_by_topic(db: sqlite3.Connection) -> str:
+    """Article counts per source (rows) and topic (columns T1, T2, ... by size).
+
+    Shows whether topics follow sources: a topic filled by one source is a warning sign.
+    """
+    topics = [name for (name,) in db.execute(
+        "SELECT COALESCE(topic, '(none)') FROM articles GROUP BY topic ORDER BY COUNT(*) DESC"
+    )]  # fmt: skip
+    codes = {name: f"T{i}" for i, name in enumerate(topics, start=1)}
+    counts = {(s, t): n for s, t, n in db.execute(
+        "SELECT s.name, COALESCE(a.topic, '(none)'), COUNT(*) FROM articles a "
+        "JOIN sources s ON s.id = a.source_id GROUP BY s.name, a.topic"
+    )}  # fmt: skip
+    sources = sorted({s for s, _ in counts})
+    rows = [(s, *[counts.get((s, t), 0) for t in topics], sum(
+        counts.get((s, t), 0) for t in topics)) for s in sources]  # fmt: skip
+    rows.append(("total", *[sum(counts.get((s, t), 0) for s in sources) for t in topics],
+                 sum(counts.values())))  # fmt: skip
+    legend = "\n".join(f"  {codes[t]} = {t}" for t in topics)
+    header = ["source", *codes.values(), "total"]
+    return table("Articles by source x topic", header, rows) + legend + "\n"
+
+
 def topic_keywords(db: sqlite3.Connection) -> str:
     rows = db.execute(
         "SELECT id, label, article_count, keywords FROM topics ORDER BY id"
@@ -89,7 +112,9 @@ def main() -> None:
     ).fetchone()[0]
     print(f"Total articles: {total}")
     print(f"Outliers ({OUTLIER_LABEL}): {outliers} ({outliers / max(total, 1):.1%})\n")
-    for section in (by_source(db), by_topic(db, total), topic_keywords(db), content_and_dates(db)):
+    sections = (by_source(db), by_topic(db, total), source_by_topic(db),
+                topic_keywords(db), content_and_dates(db))  # fmt: skip
+    for section in sections:
         print(section)
 
 

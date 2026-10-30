@@ -5,6 +5,9 @@ Run from the repo root (settings, including EMBEDDING_MODEL_NAME, come from .env
         --csv-out local-data/topic_experiment.csv \
         --table-out docs/evidence/topic_param_experiment.txt
 
+Robustness gate (DATA-3): add --robustness to rerun configs with other UMAP seeds and
+on random small batches instead of the grid; results go to --robustness-out.
+
 Read-only: the database is opened with SQLite mode=ro, nothing is saved, and the
 /ai/process job is never started. Embeddings are computed once and shared by all runs.
 
@@ -21,12 +24,14 @@ Mirrored, not reused:
     BERTopic object with the same arguments plus the min_cluster_size/min_samples tried.
   - The order of the steps in TopicModelService._cluster, copied so the topic counts
     before and after reduce_outliers can be recorded.
+  - UMAP random_state: set on the UMAP object _create_topic_model built (the app uses 42).
 """
 
 import argparse
 import csv
 import os
 import platform
+import random
 import subprocess
 import sys
 import time
@@ -51,6 +56,16 @@ MAX_OUTLIER_SHARE = 0.25
 # The real job on this database (275b6203...) gave 2 topics and 36 outliers.
 REFERENCE_TOPICS, REFERENCE_OUTLIERS, OUTLIER_TOLERANCE = 2, 36, 5
 
+# Robustness gate (DATA-3), fixed before it was run: GATE_CONFIG passes when at least
+# GATE_MIN_PASSING_SEEDS of the UMAP seeds give 5-12 topics, largest topic <= 40% and
+# outliers <= 25%, and no small batch crashes. Small-batch numbers are only reported.
+GATE_CONFIG = (8, 3)
+ALT_CONFIG = (8, 1)
+UMAP_SEEDS = (0, 1, 2, 3, 42)
+GATE_MIN_PASSING_SEEDS = 4
+SMALL_BATCH_SIZES = (50, 100)
+SUBSET_SEEDS = (1, 2, 3)
+
 
 @dataclass
 class RunResult:
@@ -67,6 +82,7 @@ class RunResult:
     coherence: float | None
     keywords: dict[int, list[str]]
     seconds: float
+    random_state: int = 42
 
     @property
     def outlier_share(self) -> float:
@@ -164,6 +180,40 @@ def format_table(results: list[RunResult]) -> str:
     return "\n".join(lines)
 
 
+def proposed_min_cluster_size(document_count: int) -> int:
+    """Formula proposed in DATA-3 for the app: like today's, but capped at 8 instead of 10."""
+    return max(2, min(8, document_count // 5))
+
+
+def proposed_min_samples(min_cluster_size: int) -> int:
+    return min(3, min_cluster_size)
+
+
+def meets_gate_criteria(result: RunResult) -> bool:
+    """The gate's per-run test: same bounds as the selection criteria, no NPMI condition."""
+    return (
+        MIN_TOPICS <= result.topics_final <= MAX_TOPICS
+        and result.largest_share <= MAX_LARGEST_SHARE
+        and result.outlier_share <= MAX_OUTLIER_SHARE
+    )
+
+
+def gate_passes(seed_results: list[RunResult], small_batch_errors: list[str]) -> bool:
+    passing = sum(meets_gate_criteria(r) for r in seed_results)
+    return passing >= GATE_MIN_PASSING_SEEDS and not small_batch_errors
+
+
+def subset_indices(total: int, size: int, seed: int) -> list[int]:
+    """A reproducible random subset, kept in the original (processing) order."""
+    return sorted(random.Random(seed).sample(range(total), size))
+
+
+def metrics_cells(result: RunResult) -> str:
+    npmi = "n/a" if result.coherence is None else f"{result.coherence:.4f}"
+    return (f"{result.topics_final:>6} {100 * result.outlier_share:>6.1f} "
+            f"{100 * result.largest_share:>6.1f} {npmi:>7}")  # fmt: skip
+
+
 # ---------- the experiment (needs the ML stack and the embedding model) ----------
 
 
@@ -212,7 +262,9 @@ def embed_unique(documents: list[str], cached: list):
     return [documents[i] for i in unique], embeddings[unique], len(usable), drift
 
 
-def run_config(documents: list[str], embeddings, min_cluster_size: int, min_samples) -> RunResult:
+def run_config(
+    documents: list[str], embeddings, min_cluster_size: int, min_samples, random_state: int = 42
+) -> RunResult:
     """One clustering, mirroring TopicModelService._cluster step by step."""
     from hdbscan import HDBSCAN
 
@@ -220,6 +272,7 @@ def run_config(documents: list[str], embeddings, min_cluster_size: int, min_samp
 
     start = time.perf_counter()
     model = TopicModelService._create_topic_model(document_count=len(documents))
+    model.umap_model.random_state = random_state
     model.hdbscan_model = HDBSCAN(
         min_cluster_size=min_cluster_size, min_samples=min_samples, metric="euclidean",
         cluster_selection_method="eom", prediction_data=True,
@@ -239,7 +292,37 @@ def run_config(documents: list[str], embeddings, min_cluster_size: int, min_samp
     keywords = {t: [w for w, _ in model.get_topic(t)[:5]] for t in sorted(set(final) - {-1})}
     return RunResult(min_cluster_size, min_samples, len(documents), *count_topics(before),
                      *count_topics(after), *count_topics(final), largest_topic_size(final),
-                     coherence, keywords, seconds)  # fmt: skip
+                     coherence, keywords, seconds, random_state)  # fmt: skip
+
+
+def run_seeds(documents: list[str], embeddings) -> list[RunResult]:
+    """GATE_CONFIG and ALT_CONFIG with every UMAP seed, on all documents."""
+    results = []
+    for size, samples in (GATE_CONFIG, ALT_CONFIG):
+        for seed in UMAP_SEEDS:
+            result = run_config(documents, embeddings, size, samples, random_state=seed)
+            print(f"({size},{samples}) seed={seed}: {result.topics_final} topics", flush=True)
+            results.append(result)
+    return results
+
+
+def run_small_batches(documents: list[str], embeddings) -> tuple[list, list[str]]:
+    """Random subsets with the proposed formula; crashes are collected, not raised."""
+    rows, errors = [], []
+    for size in SMALL_BATCH_SIZES:
+        cluster_size = proposed_min_cluster_size(size)
+        samples = proposed_min_samples(cluster_size)
+        for seed in SUBSET_SEEDS:
+            picked = subset_indices(len(documents), size, seed)
+            try:
+                result = run_config([documents[i] for i in picked], embeddings[picked],
+                                    cluster_size, samples)  # fmt: skip
+            except Exception as exc:  # a crash is a result here: it fails the gate
+                errors.append(f"n={size} subset_seed={seed}: {type(exc).__name__}: {exc}")
+                continue
+            print(f"n={size} subset_seed={seed}: {result.topics_final} topics", flush=True)
+            rows.append((size, seed, result))
+    return rows, errors
 
 
 # ---------- output ----------
@@ -262,15 +345,22 @@ def git_commit() -> str:
         return "unknown"
 
 
-def report_header(model_name: str, documents: int, cache_note: str) -> list[str]:
+def run_info(title: str, model_name: str, documents: int, cache_note: str) -> list[str]:
+    """Date, commit, Python, command and model: the first lines of every evidence file."""
     return [
-        "Topic parameter experiment (HDBSCAN grid on the DATA-1 corpus, read-only)",
+        title,
         f"Date (UTC): {datetime.now(UTC):%Y-%m-%d %H:%M}",
         f"Commit: {git_commit()}",
         f"Python: {platform.python_version()}",
         "Command: python " + " ".join(Path(a).as_posix() for a in sys.argv),
         f"Embedding model: {model_name} (HF_HUB_OFFLINE=1); documents: {documents}",
         f"Embedding check against the vectors cached by the real job: {cache_note}",
+    ]
+
+
+def report_header(model_name: str, documents: int, cache_note: str) -> list[str]:
+    title = "Topic parameter experiment (HDBSCAN grid on the DATA-1 corpus, read-only)"
+    return run_info(title, model_name, documents, cache_note) + [
         f"Criteria (fixed beforehand, on final values): {MIN_TOPICS}-{MAX_TOPICS} topics, "
         f"largest topic <= {MAX_LARGEST_SHARE:.0%}, outliers <= {MAX_OUTLIER_SHARE:.0%}; "
         "best = highest topic_coherence (NPMI)",
@@ -296,12 +386,56 @@ def report_body(results: list[RunResult]) -> list[str]:
     return lines
 
 
+def seed_lines(seed_results: list[RunResult]) -> list[str]:
+    lines = ["UMAP seeds, all documents (ok = 5-12 topics, big <= 40%, outliers <= 25%)",
+             f"{'config':>7} {'seed':>4} {'topics':>6} {'outl%':>6} {'big%':>6} {'npmi':>7} ok"]
+    for r in seed_results:
+        config = f"({r.min_cluster_size},{r.min_samples})"
+        ok = "yes" if meets_gate_criteria(r) else "no"
+        lines.append(f"{config:>7} {r.random_state:>4} {metrics_cells(r)} {ok}")
+    return lines
+
+
+def batch_lines(batch_rows: list, errors: list[str]) -> list[str]:
+    lines = ["Small batches, proposed formula, UMAP seed 42 (reported only)",
+             f"{'n':>4} {'subset':>6} {'mcs':>3} {'min_s':>5} {'topics':>6} {'outl%':>6} "
+             f"{'big%':>6} {'npmi':>7}"]  # fmt: skip
+    for size, seed, r in batch_rows:
+        lines.append(f"{size:>4} {seed:>6} {r.min_cluster_size:>3} {r.min_samples:>5} "
+                     f"{metrics_cells(r)}")  # fmt: skip
+    lines.append("Small-batch errors: " + ("; ".join(errors) if errors else "none"))
+    return lines
+
+
+def robustness_lines(seed_results: list[RunResult], batch_rows: list, errors: list[str]):
+    """Seed table, small-batch table and the gate verdict."""
+    gate_runs = [r for r in seed_results if (r.min_cluster_size, r.min_samples) == GATE_CONFIG]
+    passing = sum(meets_gate_criteria(r) for r in gate_runs)
+    verdict = "PASSES" if gate_passes(gate_runs, errors) else "DOES NOT PASS"
+    return (
+        seed_lines(seed_results)
+        + ["", f"{GATE_CONFIG}: {passing}/{len(gate_runs)} seeds meet the criteria "
+               f"(needed: {GATE_MIN_PASSING_SEEDS})", ""]  # fmt: skip
+        + batch_lines(batch_rows, errors)
+        + ["", f"Gate verdict: {GATE_CONFIG} {verdict}"]
+    )
+
+
+def write_lines(out: Path, lines: list[str]) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--db", type=Path, default=Path("local-data/ainis_eval.db"))
     parser.add_argument("--csv-out", type=Path, default=Path("local-data/topic_experiment.csv"))
     parser.add_argument("--table-out", type=Path,
                         default=Path("docs/evidence/topic_param_experiment.txt"))  # fmt: skip
+    parser.add_argument("--robustness", action="store_true",
+                        help="run the DATA-3 robustness gate instead of the grid")  # fmt: skip
+    parser.add_argument("--robustness-out", type=Path,
+                        default=Path("docs/evidence/topic_robustness.txt"))  # fmt: skip
     return parser.parse_args()
 
 
@@ -332,13 +466,22 @@ def main() -> None:
     documents, embeddings, compared, drift = embed_unique(documents, cached)
     cache_note = f"{compared} compared, max abs difference {drift}"
     print(f"Documents: {len(documents)}; {cache_note}", flush=True)
+    model_name = settings.embedding_model_name
+    if args.robustness:
+        seed_results = run_seeds(documents, embeddings)
+        batch_rows, errors = run_small_batches(documents, embeddings)
+        lines = robustness_lines(seed_results, batch_rows, errors)
+        title = "Topic robustness gate (DATA-3, read-only)"
+        write_lines(args.robustness_out,
+                    run_info(title, model_name, len(documents), cache_note) + [""] + lines)
+        print("\n".join(lines))
+        return
     results = run_grid(documents, embeddings)
     if results is None:
         sys.exit(1)
     write_csv(results, args.csv_out)
-    lines = report_header(settings.embedding_model_name, len(documents), cache_note)
-    args.table_out.parent.mkdir(parents=True, exist_ok=True)
-    args.table_out.write_text("\n".join(lines + report_body(results)) + "\n", encoding="utf-8")
+    header = report_header(model_name, len(documents), cache_note)
+    write_lines(args.table_out, header + report_body(results))
     print("\n".join(report_body(results)))
 
 

@@ -8,11 +8,16 @@ from scripts.experiment_topics import (
     RunResult,
     count_topics,
     format_table,
+    gate_passes,
     grid,
     largest_topic_size,
     meets_criteria,
+    meets_gate_criteria,
     pick_best,
+    proposed_min_cluster_size,
+    proposed_min_samples,
     reproduces_reference,
+    subset_indices,
     write_csv,
 )
 
@@ -71,3 +76,25 @@ def test_csv_and_table_outputs(tmp_path: Path) -> None:
     assert rows[0]["largest_topic_pct"] == "30.0"
     table = format_table(runs)
     assert "7>7>7" in table and "n/a" in table
+
+
+def test_proposed_formula_for_batch_sizes() -> None:
+    sizes = {n: proposed_min_cluster_size(n) for n in (10, 30, 50, 100, 200)}
+    assert sizes == {10: 2, 30: 6, 50: 8, 100: 8, 200: 8}
+    assert [proposed_min_samples(s) for s in (2, 3, 8)] == [2, 3, 3]
+
+
+def test_gate_needs_four_passing_seeds_and_no_crash() -> None:
+    good, bad = result(), result(topics=3)
+    assert not meets_gate_criteria(bad)
+    assert meets_gate_criteria(result(coherence=None))  # the gate has no NPMI condition
+    assert gate_passes([good] * 4 + [bad], [])
+    assert not gate_passes([good] * 3 + [bad] * 2, [])
+    assert not gate_passes([good] * 5, ["n=50 subset_seed=1: ValueError: boom"])
+
+
+def test_subset_indices_are_reproducible_sorted_and_unique() -> None:
+    first = subset_indices(200, 50, seed=1)
+    assert first == subset_indices(200, 50, seed=1)
+    assert first == sorted(set(first)) and len(first) == 50
+    assert first != subset_indices(200, 50, seed=2)
