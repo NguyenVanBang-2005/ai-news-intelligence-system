@@ -18,6 +18,7 @@ from app.services.ai_errors import EmbeddingModelUnavailableError
 from app.services.analyzer import HeuristicAnalyzer
 from app.services.content_extractor import ArticleContentExtractor
 from app.services.embeddings import ArticleEmbedder, encode_queries, get_embedding_model
+from app.services.hybrid_search import hybrid_order, keyword_scores
 from app.services.llm import LLMClient, LLMError
 from app.services.prompts import (
     ANSWER_SYSTEM,
@@ -176,13 +177,7 @@ class NewsSearchService:
         model, embedder = self._embedding()
         # Only the query is encoded; articles without a stored embedding are skipped
         # (POST /ai/process computes them).
-        matches = self._related_articles(
-            encode_queries(model, [text])[0],
-            embedder,
-            exclude_ids=set(),
-            count=settings.ask_max_sources,
-            cached_only=True,
-        )
+        matches = self._hybrid_articles(text, encode_queries(model, [text])[0], embedder)
 
         return [
             FoundSource(article, similarity, article.ai_summary, SUMMARY_CACHED)
@@ -284,56 +279,90 @@ class NewsSearchService:
         *,
         exclude_ids: set[int],
         count: int,
-        cached_only: bool = False,
     ) -> list[tuple[Article, float]]:
-        """The best matching articles with their similarity, one per story.
-
-        cached_only: compare only with stored embeddings, never encode articles.
-        """
+        """The best matching articles with their similarity, one per story (/ai/ask)."""
 
         candidates = [
             article
-            for article in self.articles.list_for_search(
-                limit=settings.ask_max_candidates, only_embedded=cached_only
-            )
+            for article in self.articles.list_for_search(limit=settings.ask_max_candidates)
             if article.id not in exclude_ids
         ]
 
         if not candidates or count <= 0:
             return []
 
-        if cached_only:
-            candidates, embeddings = embedder.cached(candidates)
-            if not candidates:
-                return []
-        else:
-            embeddings = embedder.embed(candidates)
+        embeddings = embedder.embed(candidates)
         similarities = embeddings @ query_embedding
         scores = similarities + np.array(
             [self._recency_boost(article) for article in candidates]
         )
 
-        picked: list[int] = []
+        order = [
+            int(index) for index in np.argsort(-scores)
+            if similarities[index] >= settings.ask_min_similarity
+        ]
         # The linked article itself counts as found, so copies of it are skipped too.
         found_embeddings = [query_embedding] if exclude_ids else []
+        picked = self._distinct(order, embeddings, count, found_embeddings)
 
-        for index in np.argsort(-scores):
-            if similarities[index] < settings.ask_min_similarity:
-                continue
+        return [(candidates[index], float(similarities[index])) for index in picked]
 
+    def _hybrid_articles(
+        self, text: str, query_embedding: np.ndarray, embedder: ArticleEmbedder
+    ) -> list[tuple[Article, float]]:
+        """Public search: stored articles ranked by meaning and by the query words.
+
+        Uses stored embeddings only. Keywords are matched in the title and the first
+        KEYWORD_CONTENT_CHARS characters of the text.
+        """
+
+        candidates, embeddings = embedder.cached(
+            self.articles.list_for_search(limit=settings.ask_max_candidates, only_embedded=True)
+        )
+
+        if not candidates:
+            return []
+
+        similarities = embeddings @ query_embedding
+        semantic_scores = similarities + np.array(
+            [self._recency_boost(article) for article in candidates]
+        )
+        order = hybrid_order(
+            similarities.tolist(),
+            semantic_scores.tolist(),
+            keyword_scores(
+                text,
+                [article.title for article in candidates],
+                [article.content for article in candidates],  # only the start is read
+            ),
+            settings.ai_search_min_similarity,
+        )
+        picked = self._distinct(order, embeddings, settings.ask_max_sources, [])
+
+        return [(candidates[index], float(similarities[index])) for index in picked]
+
+    @staticmethod
+    def _distinct(
+        order: list[int], embeddings: np.ndarray, count: int, found: list[np.ndarray]
+    ) -> list[int]:
+        """The first `count` indexes of order, skipping copies of a story already found."""
+
+        picked: list[int] = []
+
+        for index in order:
             if any(
-                float(found @ embeddings[index]) >= settings.duplicate_similarity_threshold
-                for found in found_embeddings
+                float(other @ embeddings[index]) >= settings.duplicate_similarity_threshold
+                for other in found
             ):
                 continue  # the same story from another outlet
 
-            picked.append(int(index))
-            found_embeddings.append(embeddings[index])
+            picked.append(index)
+            found.append(embeddings[index])
 
             if len(picked) == count:
                 break
 
-        return [(candidates[index], float(similarities[index])) for index in picked]
+        return picked
 
     @staticmethod
     def _recency_boost(article: Article) -> float:

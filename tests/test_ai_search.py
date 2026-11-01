@@ -192,6 +192,81 @@ def test_a_stale_embedding_is_skipped(anonymous: TestClient, engine: Engine) -> 
     assert search(anonymous, "G0 latest").json()["sources"] == []
 
 
+# --- hybrid search: meaning + keywords -------------------------------------------------
+
+
+def seed_company_news(engine: Engine) -> dict[str, int]:
+    """Articles with company names and no 'G<k>' marker, so their embedding similarity
+    to a short query is low (FakeEmbedder noise); returns their ids by title."""
+    stories = {
+        "Google launches a quantum model": "Google said the model runs on its own chips.",
+        "Google cuts cloud prices": "The company lowered prices for storage.",
+        "Microsoft ships Copilot update": "Copilot gets new agents this week.",
+        "Weather turns cold in Hanoi": "Temperatures drop sharply at night.",
+    }
+    seed(engine, groups=(0,))  # unrelated articles
+    with Session(engine) as db:
+        source_id = db.scalars(select(Article.source_id)).first()
+        for index, (title, content) in enumerate(stories.items()):
+            db.add(Article(
+                source_id=source_id, title=title, url=f"https://daily.example/c{index}",
+                content=content, summary=f"Excerpt {title}.", status="analyzed",
+            ))
+        db.commit()
+        return {a.title: a.id for a in db.scalars(select(Article)) if a.title in stories}
+
+
+def test_a_short_keyword_finds_articles_with_low_similarity(
+    anonymous: TestClient, engine: Engine
+) -> None:
+    ids = seed_company_news(engine)
+    embed_stored(engine)
+
+    sources = search(anonymous, "google").json()["sources"]
+
+    found = {source["id"] for source in sources}
+    assert found == {ids["Google launches a quantum model"], ids["Google cuts cloud prices"]}
+    # Below the similarity floor: found only through the keyword.
+    assert all(
+        source["similarity"] < news_search.settings.ai_search_min_similarity
+        for source in sources
+    )
+
+
+@pytest.mark.parametrize("text", ["xyzzy banana quantum", "qwertyuiop asdfgh"])
+def test_nonsense_words_find_nothing(
+    anonymous: TestClient, engine: Engine, text: str
+) -> None:
+    seed_company_news(engine)
+    embed_stored(engine)
+
+    # "quantum" is in one title, but one word out of three is not a match.
+    assert search(anonymous, text).json()["sources"] == []
+
+
+def test_an_exact_title_comes_first(anonymous: TestClient, engine: Engine) -> None:
+    ids = seed_company_news(engine)
+    embed_stored(engine)
+
+    sources = search(anonymous, "Microsoft ships Copilot update").json()["sources"]
+
+    assert sources[0]["id"] == ids["Microsoft ships Copilot update"]
+
+
+def test_ask_keeps_its_own_similarity_floor(
+    client: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_company_news(engine)
+    embed_stored(engine)
+    monkeypatch.setattr(news_search.settings, "ai_search_min_similarity", 0.0)
+
+    # /ai/ask has no keyword part and ignores AI_SEARCH_MIN_SIMILARITY.
+    asked = client.post("/api/v1/ai/ask", json={"input": "google"})
+
+    assert asked.status_code == 200
+    assert asked.json()["sources"] == []
+
+
 # --- link detection -------------------------------------------------------------------
 
 

@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # and the largest accepted request body.
     ai_search_rate_per_minute: int = Field(default=30, ge=1)
     ai_search_max_body_bytes: int = Field(default=4096, ge=1)
+    # Public search floor, separate from ask_min_similarity (/ai/ask keeps 0.8): an article
+    # less similar than this is shown only if it contains a query word. Short queries like
+    # "google" reach only about 0.4-0.6 with the embedding model, while random words stay
+    # under 0.3 (measured on the 200-article eval set).
+    ai_search_min_similarity: float = Field(default=0.5, ge=0, le=1)
     # Load the search code and embedding model in a background thread at startup, so the
     # first search does not wait for it. Off by default (tests, light installs).
     ai_preload_model: bool = False
