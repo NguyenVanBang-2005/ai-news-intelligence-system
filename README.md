@@ -1,465 +1,235 @@
-# AI News Intelligence API
+# AI News Intelligence System
 
 [![CI](https://github.com/NguyenVanBang-2005/ai-news-intelligence-system/actions/workflows/ci.yml/badge.svg)](https://github.com/NguyenVanBang-2005/ai-news-intelligence-system/actions/workflows/ci.yml)
 
-Backend MVP cho hệ thống thu thập, phân loại, tóm tắt và theo dõi chủ đề tin AI.
+## What it is
 
-## Chức năng hiện có
+A backend and web UI that collects AI news and organises it:
 
-- Quản lý nguồn RSS.
-- Thu thập bài viết và chống trùng theo URL.
-- Phân loại chủ đề bằng bộ từ khóa offline.
-- Tóm tắt extractive đơn giản, lưu confidence và trạng thái xử lý.
-- Lọc/phân trang bài viết; thống kê các chủ đề nổi bật.
-- OpenAPI tự động tại `/docs`.
+- **Collection**: reads RSS/Atom feeds (optionally GNews searches), skips duplicate URLs.
+- **Topics**: article embeddings + BERTopic, run as a manual batch with `POST /api/v1/ai/process`
+  (nothing is re-clustered automatically).
+- **Summaries**: extractive (sentences taken from the article).
+- **Trending**: topics with more articles in the last hours than their usual rate.
+- **Search**: hybrid semantic + keyword search over stored articles (`POST /api/v1/ai/search`).
+- **LLM**: used only by `POST /api/v1/ai/ask`, which is optional and needs the admin token.
 
-## Chạy với PostgreSQL + Docker Compose
+**Architecture**: one FastAPI application, a layered monolith:
+`routes -> services -> repositories -> models`. `app/services/` holds Python modules,
+not separate services. There is one entry point (`app.main:app`); the UI is served by the
+same process.
 
-Xem [hướng dẫn database](docs/database.md) để cấu hình `.env`, chạy migration,
-backup/restore và nâng cấp schema. Quick start nếu chưa có `.env`:
+## Quick start A: run on the host with the evaluation snapshot (recommended for a demo)
 
-```powershell
-Copy-Item .env.example .env
-docker compose up -d --build
+The snapshot `local-data/ainis_eval_v2.db` (SQLite, 200 articles, topics already computed)
+is **not in the repository** (`local-data/` is gitignored); the team sends it separately.
+Put it at `local-data/ainis_eval_v2.db` and check it:
+
+```bash
+sha256sum local-data/ainis_eval_v2.db                                       # Git Bash
+# PowerShell: (Get-FileHash local-data\ainis_eval_v2.db -Algorithm SHA256).Hash
+# expected:   863acab642547abc9598617a88572ac2d207229a0650d1adae308b3c7e5bc708
 ```
 
-Compose gồm PostgreSQL 17, Alembic migration và API. Dữ liệu nằm trong named volume;
-timestamp dùng UTC. Nếu đã có `.env` từ bản SQLite, cập nhật theo hướng dẫn trước.
+**Do not run ingestion, `POST /ai/process` or "Rescan sources" on the original file**: they
+change it. Copy it first and point `DATABASE_URL` at the copy if you want to try them.
 
-- API ở <http://127.0.0.1:8001> (`API_PORT`). Kiểm tra sống: `GET /api/v1/health`.
-- DB chỉ publish trong `compose.override.yaml` (`127.0.0.1:5432`, `POSTGRES_PORT`), file này
-  được Compose tự gộp. `docker compose -f compose.yaml up -d` thì DB không có cổng ra host.
-- Image có thư viện ML (`requirements.txt` gồm `sentence-transformers`, `bertopic`,
-  `hdbscan`, `umap-learn`); `POST /api/v1/ai/process` chỉ trả 503 khi chúng không nạp được.
+Verified on Python 3.14.7 locally; Dockerfile and CI use 3.12. All commands run from the
+repository root. *Creating the venv and `pip install` were not re-run for this release
+(an existing venv was used).*
 
-## Chạy Python local (PostgreSQL chạy trong Compose)
+1. Create the virtual environment:
 
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env  # Windows có thể copy thủ công
-docker compose up -d db
-alembic upgrade head
-uvicorn app.main:app --reload
 ```
 
-Mở `http://127.0.0.1:8000/docs`. API không tự tạo bảng; schema do Alembic quản lý.
-Dữ liệu SQLite cũ không tự động được import sang PostgreSQL.
-
-### Hai cách chạy API, hai cổng khác nhau
-
-| Cách chạy | Cổng | Swagger | Cấu hình DB |
-| --- | --- | --- | --- |
-| Docker Compose (`ainis_main`, `API_PORT=8001` trong `.env`) | 8001 | <http://127.0.0.1:8001/docs> | `POSTGRES_*`, migrate tự chạy |
-| `uvicorn app.main:app --reload` trên host | 8000 (cổng mặc định của uvicorn, không phải API Docker) | <http://127.0.0.1:8000/docs> | `DATABASE_URL` trong `.env` |
-
-Hai tiến trình độc lập; chọn một cổng và dùng đúng Swagger của nó. Tiến trình trên host
-không tự migrate: nếu `POST /api/v1/sources` trả `500 Internal Server Error` dù payload
-hợp lệ, thường PostgreSQL chưa chạy (`docker compose up -d db`) hoặc database chưa có
-bảng (`UndefinedTable: relation "sources" does not exist`). Chạy `alembic upgrade head`
-với đúng `DATABASE_URL`, rồi thử lại; traceback nằm ở terminal chạy uvicorn.
-
-## Token quản trị
-
-`POST /api/v1/sources`, `PATCH`/`DELETE /api/v1/sources/{source_id}`,
-`POST /api/v1/ingestion/run`, `POST /api/v1/ai/process`, `GET /api/v1/ai/process/{job_id}` và
-`POST /api/v1/ai/ask` cần header `X-Admin-Token` khớp `ADMIN_API_TOKEN`. Chưa đặt
-`ADMIN_API_TOKEN` thì các endpoint này trả 503; thiếu hoặc sai token thì trả 401. Tạo token:
+2. Activate it:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+source .venv/Scripts/activate        # Git Bash
 ```
 
-## Bảo mật HTTP
-
-- Mọi response (API, `/`, `/static/...`, `/docs`, lỗi 404/413) có các header
-  (`app/core/security_headers.py`):
-  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
-  `Permissions-Policy: camera=(), microphone=(), geolocation=()`. Response 500 do
-  `ServerErrorMiddleware` của Starlette tạo nằm ngoài middleware này nên có thể thiếu header.
-- **Content-Security-Policy** chỉ cho giao diện web (`/` và `/static/...`), xem mục
-  "Giao diện web". Không áp cho `/docs`, `/redoc` (tải Swagger UI/ReDoc từ CDN, có script
-  inline), `/openapi.json` và `/api/*`.
-- **Không có CORS**: không cài `CORSMiddleware`, trình duyệt chỉ gọi API từ cùng origin. UI chạy
-  chung server nên không cần.
-- File tĩnh: `/static/<file>` phục vụ đúng thư mục `app/static` (không liệt kê thư mục, không
-  tự trả `index.html`, path traversal trả 404). `GET /` vẫn trả `index.html`. UI nhiều trang dùng
-  hash route (`#/search`, `#/topics`, `#/sources`), server không có route trang riêng.
-- Endpoint admin (cần `X-Admin-Token`): `POST /sources`, `PATCH`/`DELETE /sources/{source_id}`,
-  `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask`.
-
-## Giao diện web
-
-Mở <http://127.0.0.1:8001/> (Docker Compose, `API_PORT=8001`). Viết bằng HTML/CSS/JavaScript
-thuần: không build step, không CDN, không thư viện ngoài. UI chỉ gọi API cùng origin
-(`fetch("/api/v1/...")`); server không bật CORS nên trang ở origin khác không gọi được API.
-
-```text
-app/static/
-  index.html        shell: header (logo + nav), <main id="app">, footer; không script/style inline
-  style.css         biến CSS (màu, spacing, bo góc, bóng), responsive từ 380px
-  app.js            điểm vào: khai báo route, chạy router
-  img/logo.png      logo 280x58 (đã gồm tagline "AI News Intelligence"; header phải nền #FFFFFF)
-  js/api.js         request(path, {method, body, admin}): fetch cùng origin, timeout, phân loại lỗi
-  js/dom.js         el(), externalLink(), safeHref(): dựng DOM an toàn
-  js/format.js      ngày giờ (Asia/Ho_Chi_Minh), số, điểm "+2.1σ", phần trăm
-  js/router.js      hash router
-  js/components.js  loading, empty state, banner lỗi, badge, thẻ, "Coming soon"
-  js/trending.js    fetchTrending(): GET /topics/trending, cache trong bộ nhớ 60 s
-  js/drawer.js      panel trượt (dialog): focus, Tab xoay vòng, Esc, khóa cuộn nền
-  js/pages/search.js          trang Search: ô tìm, chip trending, bố cục kết quả + sidebar
-  js/pages/search-results.js  danh sách kết quả (POST /api/v1/ai/search)
-  js/pages/trending-ui.js     chip "Trending:" và sidebar "Trending topics"
-  js/pages/article-drawer.js  drawer chi tiết bài (GET /api/v1/articles/{id})
-  js/focus-trap.js            giữ focus Tab trong drawer/hộp thoại
-  js/admin-token.js           token admin của tab (sessionStorage) + adminRequest()
-  js/confirm-dialog.js        hộp thoại xác nhận tự dựng (role="alertdialog")
-  js/pages/sources.js         trang Sources: ghép các phần dưới
-  js/pages/admin-access.js    khối "Admin access": nhập, dùng, xóa token
-  js/pages/rescan.js          nút "Rescan sources", 4 thẻ số liệu, kết quả lần chạy cuối
-  js/pages/source-form.js     form thêm nguồn RSS/Atom
-  js/pages/source-list.js     bảng "Source list": trạng thái, bật/tắt, xóa
-  js/pages/source-status.js   tên ngôn ngữ và trạng thái đồng bộ (tính ở client)
-  js/pages/classified-list.js "Latest classified articles" + lọc theo topic
+```powershell
+.\.venv\Scripts\Activate.ps1         # PowerShell
 ```
 
-### Trang Search: nguồn dữ liệu từng phần
-
-| Phần | Dữ liệu | Ghi chú |
-|---|---|---|
-| Ô tìm + danh sách kết quả | `POST /api/v1/ai/search` | Tiêu đề và mũi tên mở drawer, không mở thẳng trang gốc |
-| Chip "Trending:" ở hero | `GET /api/v1/topics/trending?window_hours=24&baseline_days=7&min_articles=2&limit=10` | Tối đa 4 topic điểm cao nhất; danh sách rỗng hoặc lỗi thì ẩn cả hàng chip |
-| Sidebar "Trending topics" | Cùng request với chip (một request mỗi lần mở trang, cache 60 s) | Chỉ hiện sau lần tìm đầu; lỗi thì hiện "Trending is unavailable right now." |
-| Drawer chi tiết bài | `GET /api/v1/articles/{id}` | Gọi mỗi lần mở; 404 hiện "This article is no longer available."; lỗi khác có nút Retry |
-
-Các quyết định:
-- **Điểm trending là xấp xỉ** (`trend_score`, số độ lệch chuẩn so với mức thường). Nhãn "24h" và
-  chú thích "24 hours / 7 days" lấy từ chính tham số đã gửi (`TRENDING_PARAMS` trong
-  `js/trending.js`). Thanh tiến độ tỉ lệ với điểm cao nhất trong danh sách.
-- Bấm chip hoặc một dòng sidebar: điền topic vào ô tìm và tìm luôn.
-- **Drawer không có deep-link**: mở hoặc đóng drawer không đổi URL/hash, và đổi route sẽ đóng
-  drawer. Drawer đọc mọi trường từ `GET /articles/{id}`, không dùng lại dữ liệu của kết quả
-  search. Nội dung dài hơn 4000 ký tự có nút "Show full text" (không gọi API thêm). Nút "Open
-  original article" chỉ hiện khi URL là `http(s)://`.
-- Truy cập: drawer có `role="dialog"`, `aria-modal`, focus vào nút đóng khi mở, Tab/Shift+Tab
-  xoay vòng trong drawer, Esc hoặc bấm nền mờ để đóng, focus trả về nút đã mở; nền bị khóa cuộn
-  bằng class `drawer-open` trên `<body>`; `prefers-reduced-motion` tắt hiệu ứng trượt.
-
-### Trang Sources (`#/sources`)
-
-| Phần | Dữ liệu | Ghi chú |
-|---|---|---|
-| Khối "Admin access" | (không gọi API) | Ô password, "Use token", "Clear token"; trạng thái "No token: read-only" / "Token set (not verified yet)" / "Token verified" |
-| Nút "Rescan sources" + 4 thẻ | `POST /api/v1/ingestion/run` (admin) | Thẻ hiện "–" đến lần Rescan đầu; tỉ lệ trùng = `duplicates_skipped / articles_seen` (ẩn khi bằng 0) |
-| Form "Add an RSS/Atom source" | `POST /api/v1/sources` (admin, `type: "rss"`) | Kiểm tên 2-120 ký tự và URL `http(s)://` trước khi gửi; 409/422 có thông báo riêng |
-| Bảng "Source list" | `GET /api/v1/sources` (public) | Trạng thái Stable/Warning/Error/Inactive/Not synced yet tính từ `is_active`, `last_status`, `last_error`, `last_synced_at`; URL feed là chữ thường, không phải link |
-| Công tắc Active | `PATCH /api/v1/sources/{id}` (admin) | Không cập nhật lạc quan: chỉ đổi theo `SourceRead` server trả về |
-| Nút Delete | `DELETE /api/v1/sources/{id}` (admin) | Luôn qua hộp thoại xác nhận, focus mặc định ở Cancel |
-| "Latest classified articles" | `GET /api/v1/articles?status=ai_analyzed&limit=10[&topic=...]`, `GET /api/v1/ai/topics` | Pill "All" + tối đa 8 topic lớn nhất; bấm dòng mở drawer chi tiết bài |
-
-**Token admin** (chỉ dùng trên máy local tin cậy):
-- Token được giữ trong `sessionStorage` của tab (nếu trình duyệt chặn thì giữ trong bộ nhớ): mất
-  khi đóng tab, không lưu `localStorage`, cookie hay URL, không ghi ra console, không đặt vào
-  thuộc tính DOM. Chỉ `js/admin-token.js` đọc/ghi token; `api.js` nhận token qua tham số.
-- Token chỉ được gửi trong header của request admin. Request công khai (`GET /sources`,
-  `/articles`, `/ai/topics`) không kèm token. Chưa có token thì mọi nút ghi bị khóa và không có
-  request admin nào được gửi.
-- Không có endpoint kiểm tra token, nên trạng thái "Token verified" chỉ có sau một lệnh admin
-  thành công. 401 → "The admin token was rejected. Enter it again." và mở lại ô nhập;
-  503 → "The server has no admin token configured."
-- Ai mở được tab đó (hoặc chạy được script trong trang) đều đọc được token: đừng dùng trên máy
-  dùng chung hay khi trang có thể bị nhúng mã lạ.
-
-**Giới hạn đã biết**:
-- 4 thẻ số liệu chỉ có sau khi bấm Rescan (server không lưu lịch sử chạy). Kết quả lần cuối được
-  giữ trong `sessionStorage` của tab cùng thời điểm chạy.
-- **Xóa nguồn xóa luôn toàn bộ bài của nguồn đó** (cascade), không hoàn tác được.
-- Rescan chạy đồng bộ, có thể mất vài phút (timeout phía trình duyệt 180 s,
-  `RESCAN_TIMEOUT_MS`). Hết thời gian chờ không có nghĩa là thất bại: server có thể vẫn đang chạy.
-- Hai lần Rescan cùng lúc (hai tab, hai người) không bị khóa và có thể ghi đè trạng thái đồng bộ
-  của nhau.
-- "Latest classified articles" sắp theo ngày xuất bản (`published_at`), không theo thời điểm
-  phân loại.
-- Nguồn mới chỉ được kiểm tra feed ở lần Rescan sau ("The feed is checked the next time sources
-  are rescanned."); form chỉ thêm nguồn RSS/Atom.
-
-- **Hash route**: `#/search` (mặc định), `#/topics`, `#/sources`. Hash lạ quay về Search. Topics
-  hiện là thẻ "Coming soon". Server chỉ có `GET /` và `/static/...`.
-- **CSP** (`app/core/security_headers.py`, chỉ trên `/` và `/static/...`):
-  `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';
-  connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'`.
-  Không `'unsafe-inline'`/`'unsafe-eval'`, nên mọi script và style phải nằm trong file. Style động
-  (nếu cần) chỉ đặt bằng `element.style.setProperty`, không `setAttribute("style")`.
-- **Render an toàn**: chữ từ API chỉ vào DOM qua `textContent`/text node (`el()` trong
-  `js/dom.js`). Không dùng `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
-  `eval` (có test grep). Link bài báo đi qua `safeHref()` (chỉ nhận `http://`, `https://`, ngược
-  lại hiện chữ thường) và luôn có `target="_blank" rel="noopener noreferrer"`.
-- **Token admin**: chỉ trang Sources có ô nhập token (xem trên); `api.js` nhận token qua tham số,
-  không lưu.
-- **Timeout**: request thường chờ 20 s (`DEFAULT_TIMEOUT_MS`), search chờ 60 s
-  (`SEARCH_TIMEOUT_MS`), vì lần search đầu có thể phải chờ nạp model (xem "Nạp sẵn model").
-  Sau 5 s chưa có kết quả, trang hiện thêm dòng giải thích.
-- **Favicon**: `<link rel="icon" href="data:,">` (biểu tượng rỗng) để trình duyệt không gọi
-  `/favicon.ico`; favicon thật chưa làm.
-- **`/docs` cần Internet**: Swagger UI và ReDoc được tải từ CDN (jsdelivr). Trang web chính
-  không cần CDN.
-- Thời gian từ API không có hậu tố múi giờ được coi là UTC, hiển thị theo giờ Việt Nam; thiếu
-  hoặc sai thì hiện "Date unknown".
-
-## Danh sách endpoint
-
-Prefix `/api/v1`. "admin" = cần `X-Admin-Token`.
-
-| Method | Path | Auth | Ghi chú |
-|---|---|---|---|
-| GET | `/health` | public | `{"status": "ok"}` |
-| GET | `/sources` | public | `SourceRead`: `id`, `name`, `type`, `feed_url`, `query`, `language`, `is_active`, `created_at`, `last_synced_at`, `last_status`, `last_error` (xem "Trạng thái đồng bộ") |
-| POST | `/sources` | admin | `SourceCreate`; 201, 409 nếu trùng tên hoặc `feed_url` |
-| PATCH | `/sources/{source_id}` | admin | Body `{"is_active": bool}`; trả `SourceRead`, 404 nếu không có. Nguồn tắt bị ingestion bỏ qua |
-| DELETE | `/sources/{source_id}` | admin | 204; xóa luôn mọi bài của nguồn (cascade) |
-| POST | `/ingestion/run` | admin | Query `source_id` tùy chọn; trả `sources_processed`, `articles_seen`, `articles_created`, `duplicates_skipped`, `errors` |
-| GET | `/articles` | public | Query `topic`, `status`, `limit` (1-100), `offset`; trả `items`, `total`, `limit`, `offset` |
-| GET | `/articles/{article_id}` | public | `ArticleRead`: `id`, `source_id`, `source_name`, `title`, `url`, `author`, `content`, `summary`, `topic`, `confidence`, `status`, `published_at`, `created_at` |
-| GET | `/topics/trending` | public | Query `window_hours`, `baseline_days`, `min_articles`, `limit`; trả `topic`, `article_count`, `expected_count`, `trend_score` |
-| GET | `/topics/timeseries` | public | Query `days` (1-30, mặc định 7), `limit` (1-10, mặc định 3), `window_hours`, `baseline_days`, `min_articles` (như trending); trả `topic`, `trend_score`, `article_count`, `points[]` (`date` "YYYY-MM-DD" theo UTC, `count`). Xem "Chuỗi thời gian chủ đề" |
-| GET | `/ai/topics` | public | `id`, `label`, `size`, `keywords`, `representative_articles`, `updated_at` |
-| POST | `/ai/search` | public, rate limit | Body `{"input": "..."}`; `sources[]`: `id`, `title`, `url`, `source_name`, `topic`, `published_at`, `similarity`, `summary`, `summary_method` |
-| POST | `/ai/ask` | admin | Như `/ai/search` nhưng nhận link, gọi LLM và trả thêm `answer` |
-| POST | `/ai/process` | admin | 202 kèm job `id` |
-| GET | `/ai/process/{job_id}` | admin | Trạng thái job (`error` có thể chứa chi tiết nội bộ nên không public) |
-
-## Luồng thử nhanh
-
-1. `POST /api/v1/sources` với JSON:
-
-```json
-{
-  "name": "MIT Technology Review - AI",
-  "feed_url": "https://www.technologyreview.com/feed/",
-  "language": "en"
-}
-```
-
-2. `POST /api/v1/ingestion/run` để lấy RSS và phân tích bài mới.
-3. Xem `GET /api/v1/articles` và `GET /api/v1/topics/trending`. Trending so sánh số bài
-   trong `window_hours` gần nhất (mặc định 24) với mức bình thường của `baseline_days`
-   ngày trước đó (mặc định 7); `trend_score` là số độ lệch chuẩn vượt mức bình thường.
-
-### Chuỗi thời gian chủ đề
-
-`GET /api/v1/topics/timeseries` trả số bài mỗi ngày của các chủ đề đang trending, cho biểu đồ.
-
-- Chọn chủ đề bằng chính `TrendingTopicsService` của `/topics/trending` (cùng `trend_score`,
-  cùng `window_hours`/`baseline_days`/`min_articles`), lấy `limit` chủ đề có `trend_score` cao
-  nhất, xếp giảm dần. Nhãn catch-all `Other` và `Other / Outlier` bị loại. Không có chủ đề nào
-  đủ điều kiện thì trả `[]`.
-- `trend_score` và `article_count` giống hệt `/topics/trending`: `article_count` là số bài trong
-  cửa sổ `window_hours`, không phải tổng các `points`.
-- `points`: đúng `days` ngày **UTC** liên tiếp, cũ nhất trước, kết thúc ở ngày UTC hiện tại.
-  Ngày không có bài vẫn có điểm với `count: 0` (zero-fill). Thời điểm của bài là
-  `published_at`, nếu thiếu thì `created_at` (như trending). Bài có `published_at` ở tương lai
-  (sau hôm nay theo UTC) không được đếm.
-- Đếm theo ngày bằng Python (không dùng hàm ngày riêng của SQLite/PostgreSQL), nên kết quả như
-  nhau trên hai DB. Một request chạy tối đa 2 truy vấn: một cho trending, một lấy
-  `(topic, thời điểm)` của các chủ đề đã chọn.
-- Giới hạn: đọc tối đa `TIMESERIES_MAX_ROWS` = 50.000 dòng mỗi request
-  (`app/services/topic_timeseries.py`), mới nhất trước. Nếu vượt, các ngày cũ nhất bị đếm thiếu.
-
-### Loại nguồn: RSS/Atom và News API
-
-`POST /api/v1/ingestion/run?source_id=ID` thu thập bài mới từ source đã lưu; bỏ `source_id`
-sẽ chạy mọi nguồn active. Endpoint không nhận URL qua request body.
-
-#### Trạng thái đồng bộ
-
-Sau mỗi nguồn được chạy, ingestion ghi và commit ba cột của nguồn đó (migration
-`0007_source_sync_status`). Nguồn chưa từng chạy: cả ba là `null`. Nguồn tắt (`is_active=false`)
-không bị đọc feed và không bị cập nhật; chạy với `source_id` chỉ cập nhật nguồn đó.
-
-- `last_synced_at`: thời điểm (UTC) xử lý xong nguồn trong lần chạy gần nhất.
-- `last_status`:
-  - `error`: lần chạy gặp lỗi (tải hoặc parse feed thất bại, lỗi News API, lỗi lưu bài).
-  - `warning`: không lỗi nhưng feed không có bài nào (`articles_seen` của riêng nguồn = 0).
-  - `ok`: các trường hợp còn lại, kể cả khi mọi bài đều đã có (chỉ trùng).
-- `last_error`: chỉ có khi `error`. Là **thông điệp rút gọn** dạng `<LoạiLỗi>: <thông điệp cố định>`,
-  ví dụ `UnsupportedFeedError: Link returns HTML or another document, not RSS/Atom`,
-  `ReadTimeout: Request timed out`, `UnsafeFeedUrlError: Blocked non-public or unresolvable address`.
-  Không bao giờ chứa URL, hostname, IP, text gốc của exception hay stack trace, vì
-  `GET /sources` là public; tối đa 300 ký tự. Bảng ánh xạ ở `app/services/sync_errors.py`; loại lỗi
-  lạ ghi `Unexpected error`. Chi tiết đầy đủ vẫn có trong `errors` của response
-  `POST /ingestion/run` (admin).
-
-- `type: "rss"` (mặc định): đọc `feed_url`. `HttpUrl` chỉ kiểm tra cú pháp khi tạo source,
-  không xác nhận nội dung là feed; trang HTML và URL bài viết đơn lẻ không được hỗ trợ.
-- `type: "news_api"`: tìm bài theo `query` qua GNews (https://gnews.io). Cần đặt
-  `NEWS_API_KEY` (gói miễn phí: tối đa 10 bài mỗi lần, khoảng 100 lần/ngày). Ví dụ:
-
-```json
-{
-  "name": "Toyota news",
-  "type": "news_api",
-  "query": "toyota",
-  "language": "en"
-}
-```
-
-- Full-text: khi nguồn chỉ có đoạn trích ngắn hơn `FULL_TEXT_MIN_CHARS` (mặc định 800 ký tự),
-  ingestion tải trang bài viết để lấy toàn văn; tải lỗi thì giữ đoạn trích. Tắt bằng
-  `INGESTION_FULL_TEXT=false`. Bật tính năng này làm ingestion chậm hơn vì phải tải từng bài.
-
-Ví dụ tạo source bằng `POST /api/v1/sources`:
-
-```json
-{
-  "name": "MIT AI RSS",
-  "feed_url": "https://news.mit.edu/topic/mitartificial-intelligence2-rss.xml",
-  "language": "en"
-}
-```
-
-`feed_url` phải là địa chỉ RSS/Atom của nhà xuất bản (thường kết thúc `.xml`/`/feed`/`/rss`,
-hoặc lấy từ biểu tượng RSS của trang). Một URL bài viết như
-`https://news.mit.edu/2026/craig-rowe-soars-to-new-heights-1001` là trang HTML: POST vẫn
-trả 201 (chỉ kiểm tra cú pháp, không gọi mạng), nhưng ingestion báo `UnsupportedFeedError`
-trong `errors` và không tạo bài. Sửa bằng cách tạo source mới với URL RSS đúng.
-
-Lấy `id` trả về, gọi ingestion với ID đó. Dùng `GET /api/v1/sources` để kiểm tra
-URL thực sự được lưu; nếu POST trả 409, tìm source đã tồn tại và dùng ID của nó.
-Không cần xóa nguồn cũ để thử nguồn mới; xóa source sẽ xóa kèm các bài của nguồn.
-
-HTTP 200 biểu thị batch đã trả kết quả, không bảo đảm mọi nguồn thành công.
-HTML/non-feed trả `UnsupportedFeedError` trong `errors`, kèm HTTP status và
-Content-Type của nguồn. Feed hợp lệ nhưng rỗng vẫn trả 0 bài và không có lỗi.
-Entry thiếu title/link hợp lệ bị bỏ trước khi tăng `articles_seen`; log INFO của
-`app.services.feed` ghi số entry, số được xét/nhận/bỏ. Content lấy từ feed,
-không tải toàn văn URL bài. Nếu `articles_created=0` nhưng `articles_seen>0`
-và `duplicates_skipped=articles_seen`, các bài đã tồn tại, không phải lỗi lấy RSS.
-
-## Kiểm tra
+3. Install the dependencies (includes the ML libraries):
 
 ```bash
+pip install -r requirements.txt
+```
+
+4. Run:
+
+```bash
+# Git Bash
+DATABASE_URL="sqlite:///local-data/ainis_eval_v2.db" \
+EMBEDDING_MODEL_NAME="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2" \
+HF_HUB_OFFLINE=1 AI_PRELOAD_MODEL=true \
+uvicorn app.main:app --port 8000
+```
+
+```powershell
+# PowerShell
+$env:DATABASE_URL = "sqlite:///local-data/ainis_eval_v2.db"
+$env:EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+$env:HF_HUB_OFFLINE = "1"
+$env:AI_PRELOAD_MODEL = "true"
+uvicorn app.main:app --port 8000
+```
+
+Then open <http://127.0.0.1:8000/>. Health: `GET /api/v1/health` returns
+`{"status":"ok","model_ready":true}` once the model is loaded (`/health` without the prefix is 404).
+
+Notes:
+
+- `EMBEDDING_MODEL_NAME` must be the model above: the snapshot's embeddings and the search
+  threshold were made with it. The default in `app/core/config.py` is a different model
+  (`intfloat/multilingual-e5-base`); `.env.example` already sets the right one.
+- `HF_HUB_OFFLINE=1` must be a real environment variable of the process. A line in `.env`
+  is not enough: `.env` is read by the app's settings, not by the Hugging Face library.
+  Offline mode needs the model already in the local Hugging Face cache; without it, the
+  model is downloaded on first use (needs Internet).
+- The first start takes about 30 seconds to import the ML libraries and load the model.
+  `AI_PRELOAD_MODEL=true` does this in the background at startup, so the first search does
+  not wait; without it the first search waits instead.
+- Admin endpoints answer 503 until `ADMIN_API_TOKEN` is set (see Configuration).
+
+## Quick start B: Docker Compose (PostgreSQL 17 + migrations + API)
+
+```bash
+cp .env.example .env      # then set POSTGRES_PASSWORD and ADMIN_API_TOKEN
+docker compose up -d --build
+```
+
+- API and UI on <http://127.0.0.1:8001/> (`API_PORT`, default 8001). The DB is published on
+  `127.0.0.1:${POSTGRES_PORT}` only through `compose.override.yaml` (local development).
+- The image installs `requirements.txt`, so it **has the ML libraries**. The embedding model
+  is **not** in the image: it is downloaded on first use (needs Internet).
+- A fresh stack has an **empty database**: no articles and no topics until you add sources,
+  run ingestion (`POST /api/v1/ingestion/run`) and then `POST /api/v1/ai/process`.
+- Database setup, backup and restore: [docs/database.md](docs/database.md).
+- Last verified on 2026-10-27 at commit `229f9d0`
+  ([postgres_backup_restore.txt](docs/evidence/postgres_backup_restore.txt): start, restart,
+  backup, restore); fresh start also in [compose_fresh_start.txt](docs/evidence/compose_fresh_start.txt)
+  (2026-10-24). **Not re-verified at the current main.**
+
+## Configuration
+
+Copy `.env.example` to `.env`. Values in the real environment override `.env`.
+Never commit `.env`.
+
+| Variable | `.env.example` | Meaning |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL on `127.0.0.1:5432` | Host runs only; inside Compose the URL is built from `POSTGRES_*` |
+| `POSTGRES_PASSWORD` | placeholder `news` | Compose database password; the placeholder is for local development only, change it. If you change it and also run on the host with `DATABASE_URL`, change the password in `DATABASE_URL` too |
+| `API_PORT` | `8001` | Host port of the Compose API |
+| `ADMIN_API_TOKEN` | empty | Token for admin endpoints; empty means they answer 503. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Must be set: the code default is a different model |
+| `AI_PRELOAD_MODEL` | `true` | Load the model in the background at startup (code default `false`) |
+| `AI_SEARCH_MIN_SIMILARITY` | `0.5` | Public search: an article below this is shown only if it contains at least half of the query's distinct words (common words ignored); tuned with the model above |
+| `ASK_MIN_SIMILARITY` | `0.8` | Similarity floor for `/ai/ask` |
+| `ASK_ALLOW_LINKS` | `false` | Whether `/ai/ask` accepts a link and downloads it (code default `true`) |
+| `INGESTION_FULL_TEXT` | `false` | Download the article page when the feed gives only a short snippet (code default `true`) |
+| `AI_SEARCH_RATE_PER_MINUTE` | `30` | Public search requests per client IP per minute, counted per process; over it: 429 with `Retry-After` |
+| `AI_SEARCH_MAX_BODY_BYTES` | `4096` | Largest accepted search request body |
+
+The LLM for `/ai/ask` is any OpenAI-compatible API (`LLM_BASE_URL`, `LLM_MODEL`,
+`LLM_API_KEY`); see the comments in `.env.example`.
+
+## Using it
+
+Web UI (same origin as the API, no build step):
+
+- **Search** (`/`, `#/search`): hybrid search, trending chips, article detail drawer.
+- **Topics** (`#/topics`): topic cards, a daily chart of trending topics, article list per topic.
+- **Sources** (`#/sources`): source list; with an admin token, add/disable/delete sources and
+  "Rescan sources" (runs ingestion).
+- **API** (`/docs`): Swagger UI.
+
+All API paths are under `/api/v1`.
+
+| Access | Endpoints |
+|---|---|
+| Public | `GET /health`, `GET /sources`, `GET /articles`, `GET /articles/{id}`, `GET /topics/trending`, `GET /topics/timeseries`, `GET /ai/topics`, `POST /ai/search` (rate limited) |
+| Admin (`X-Admin-Token`) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
+
+Admin endpoints answer **401** when the token is missing or wrong, and **503** when the
+server has no `ADMIN_API_TOKEN`. Deleting a source also deletes its articles.
+UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
+
+## Evaluation
+
+- Corpus ([eval_dataset_summary.txt](docs/evidence/eval_dataset_summary.txt)): 200 articles
+  from 8 RSS feeds (2 more feeds were blocked by bot protection). After the topic
+  configuration chosen on 2026-10-30 (HDBSCAN `min_cluster_size` capped at 8,
+  `min_samples` 1): **10 topics, 35 outliers (17.5%)**.
+- That configuration was **chosen on this same corpus**
+  ([topic_param_experiment.txt](docs/evidence/topic_param_experiment.txt),
+  [topic_robustness.txt](docs/evidence/topic_robustness.txt)), so these numbers are not an
+  independent test.
+- Quality protocol ([docs/evaluation-guide.md](docs/evaluation-guide.md)): a stratified
+  sample of 50 articles (`scripts/export_corpus.py`), labeled by two people independently
+  for topic correctness and summary quality; `scripts/score_corpus.py` reports percent
+  agreement and Cohen's kappa.
+- **No accuracy figures are reported yet**: the sample has not been labeled.
+
+## Tests and CI
+
+```bash
+pip install -r requirements-dev.txt   # requirements.txt + pytest, pytest-cov, ruff
 ruff check .
-pytest --cov=app
+pytest -rs
 ```
 
-Test PostgreSQL (`tests/test_sources_regression.py`) chỉ chạy khi có máy chủ **thử**: đặt
-`TEST_POSTGRES_ADMIN_URL` trỏ tới database `postgres` của máy chủ đó (ví dụ container tạm
-`postgres:17-alpine` publish ở `127.0.0.1`). Mỗi test tự tạo và xóa database `ainis_pytest_*` riêng,
-không đụng database có sẵn; không đặt biến này trỏ vào máy chủ chính. Thiếu biến thì các
-case PostgreSQL bị skip, phần SQLite vẫn chạy.
+PostgreSQL cases run only when `TEST_POSTGRES_ADMIN_URL` points to a **throwaway** PostgreSQL
+server (each test creates and drops its own database); otherwise they are skipped.
 
-Kết quả đã ghi (số liệu theo từng commit dưới đây):
+Latest local run ([test_results_dee8d99.txt](docs/evidence/test_results_dee8d99.txt)),
+2026-11-01, commit `dee8d99`, Windows, Python 3.14.7, SQLite only: `ruff check .` clean;
+**689 passed, 215 skipped, 0 failed**. All 215 skips are PostgreSQL cases
+(`TEST_POSTGRES_ADMIN_URL` not set).
 
-| Lần chạy | Commit | Ngày | Kết quả | Evidence |
-|---|---|---|---|---|
-| Toàn bộ suite, chỉ SQLite (host Windows) | `f81e97e` | 2026-10-24 | 246 passed, 132 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
-| Toàn bộ suite, SQLite + PostgreSQL 17 (host Windows) | `f81e97e` | 2026-10-24 | 377 passed, 1 skipped, 0 failed | `docs/evidence/test_results_f81e97e.txt` |
-| Chỉ `tests/test_ai_pipeline.py`, trong image `ai-news-intelligence:local` với PostgreSQL 17 (`postgres:17-alpine`, container tạm trên cùng network Docker) | `fbd4419` | 2026-10-25 | 43 passed, 0 failed, 0 skipped | `docs/evidence/test_ai_pipeline_docker_fbd4419.txt` |
-| CI GitHub Actions (Ubuntu, Python 3.12, PostgreSQL 17), run #2, trigger push lên main | `f883293` | 2026-10-26 | 420 passed, 0 failed, 0 skipped | `docs/evidence/ci_f883293.txt` |
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull
+request: Ubuntu, Python 3.12, `pip install -r requirements-dev.txt`, `ruff check .`, and
+`pytest -v -rs -o addopts=""` against a PostgreSQL 17 service. CI on GitHub also runs the
+PostgreSQL tests.
 
-Trên host Windows, `tests/test_ai_pipeline.py` bị skip vì Windows Application Control chặn
-DLL native của `hdbscan`; trong Docker module này chạy được. Lần chạy Docker chỉ gồm module
-đó, chưa có kết quả cho toàn bộ suite trong Docker. `test_ai_pipeline` cũng chạy trong CI vì runner cài `requirements-dev.txt`.
+## Known limitations
 
-## AI API
+- Search rate limit is in memory, per process (several workers count separately).
+- Two "Rescan sources" runs at the same time are not locked against each other.
+- AI jobs run inside the API process; a restart loses a running job.
+- The admin token is kept in the tab's `sessionStorage`: use it only on a trusted local machine.
+- `/docs` needs Internet (Swagger UI is loaded from a CDN); the main UI does not.
+- No automatic backups.
+- The PNG logo looks blurry on 2x screens.
+- Topic labels mix heuristic names and BERTopic keywords.
+- Topics partly follow the source (some feeds fall mostly into one topic).
+- The topic configuration was chosen on the same corpus it is reported on.
+- Public search shows at most 5 results (`ASK_MAX_SOURCES`, default 5).
+- Search does no stemming ("centers" does not match "center").
+- With a two-word query, one matching word is enough, so unrelated articles can appear.
+- Articles found only by keyword can show a low similarity score.
+- The UI was checked with automated tests in headless Microsoft Edge and manually in Brave;
+  Firefox and Safari were not tested.
+- Library versions are not pinned (ranges in `requirements*.txt`), and CI runs Python 3.12
+  while the dev machine runs 3.14.7, so a test that passes on the dev machine may not pass in CI.
+- "Rescan sources" with a real public RSS feed has not been tested from the browser (only
+  through the API).
+- Model loading takes time at startup (about 30 seconds on the dev machine).
+- Two RSS sources (VentureBeat, AI News) block bots.
+- The corpus is a one-day snapshot; ingesting again will not reproduce it. Its articles
+  are older than the 24-hour trending window, so on the snapshot the trending chips are
+  hidden and the Topics chart says no topic is trending.
+- PostgreSQL is checked only by CI and by the backup/restore run of 2026-10-27.
 
-- `POST /api/v1/ai/process` xếp một job chạy nền và trả `202` kèm `id` ngay. `409` nếu
-  chưa đủ bài (`AI_MIN_DOCUMENTS`) hoặc đang có job khác chạy; `503` nếu không nạp được thư viện ML.
-- `GET /api/v1/ai/process/{job_id}` (cần `X-Admin-Token`) trả `status` (`pending` → `running` → `succeeded` | `failed`),
-  `error` khi thất bại và `result` khi thành công. `result` gồm số liệu batch,
-  `confidence_method` (`hdbscan_soft` là điểm thật từ HDBSCAN; `fallback` là giá trị cố định 0.5)
-  và `topic_coherence` (NPMI trung bình, -1..1, càng cao càng tốt — so sánh giữa các batch
-  để biết đổi tham số có cải thiện không).
-- `GET /api/v1/ai/topics` liệt kê topic: `size`, `keywords` kèm trọng số và
-  `representative_articles` (bài gần tâm topic nhất).
-- Embedding của bài được lưu trong bảng `articles` (cột `embedding`, khóa theo model + nội dung),
-  nên chạy lại hoặc `force=true` chỉ encode bài mới hoặc bài đã đổi nội dung.
-- Job chạy bằng FastAPI `BackgroundTasks` trong cùng tiến trình: không tự retry, và job bị
-  gián đoạn khi server restart sẽ không chặn job mới sau `AI_JOB_TIMEOUT_SECONDS`.
+## Reading the code
 
-## Tìm kiếm tin tức (Q&A)
-
-Trang `/` gọi `POST /api/v1/ai/search` (public, không cần token): chỉ tìm trong bài đã lưu,
-giới hạn 30 request/phút mỗi địa chỉ (`AI_SEARCH_RATE_PER_MINUTE`, vượt thì 429 kèm
-`Retry-After`), body tối đa 4096 byte (`AI_SEARCH_MAX_BODY_BYTES`), không nhận link (422).
-
-### Nạp sẵn model (`AI_PRELOAD_MODEL`)
-
-- Mặc định trong code là `false`; `.env.example` đặt `true`. Khi bật, lúc khởi động server
-  mở một thread nền để import code search (torch, sentence-transformers) rồi nạp model
-  embedding. Server **không chờ** việc này để nhận request, và nạp lỗi chỉ ghi log, không
-  làm server dừng; khi đó search vẫn trả 503 như cũ và lần search sau sẽ thử nạp lại.
-- Model chỉ được nạp một lần (`app/services/model_preload.py`). Request đến trong lúc đang
-  nạp sẽ chờ lần nạp đó, kể cả khi hai request đầu đến cùng lúc.
-- `GET /api/v1/health` có thêm `model_ready` (true/false). Trường này chỉ để thông tin:
-  health vẫn trả 200 `"status": "ok"` khi model chưa sẵn sàng.
-- **Giới hạn khi không bật preload:** lần search đầu sau khi khởi động phải chờ import và nạp
-  model. Đo trên máy dev (Windows 11, 16 CPU, Python 3.14, model
-  `paraphrase-multilingual-MiniLM-L12-v2` có sẵn trong cache, `HF_HUB_OFFLINE=1`), 3 lần
-  khởi động lại: lần đầu 28.0–28.3 s (import khoảng 25.8 s, nạp model khoảng 2.3 s), lần
-  sau 0.02–0.03 s, RAM tiến trình khoảng 1.25 GB sau khi nạp. Trang web chờ search tối đa
-  60 s và sau 5 s hiện dòng "The first search can take up to a minute while the model loads."
-- **Mạng:** model lấy từ cache Hugging Face (`~/.cache/huggingface`). Docker image không có
-  sẵn model, nên container tải ở lần chạy đầu. Máy không có mạng nên đặt `HF_HUB_OFFLINE=1`
-  khi model đã có trong cache. Không đặt thì thư viện thử kết nối lại nhiều lần, và trong
-  lần đo, lần nạp vẫn chưa xong sau hơn 2 phút. Model không có trong cache thì search trả 503.
-
-`POST /api/v1/ai/ask` với `{"input": "..."}` cần `X-Admin-Token`; nhận yêu cầu hoặc link bài báo.
-`ASK_ALLOW_LINKS` và `INGESTION_FULL_TEXT` mặc định `true` trong code nhưng `false` trong
-`.env.example`; với `ASK_ALLOW_LINKS=false`, link bị trả 422 trước mọi lệnh gọi mạng.
-
-- Kết quả gồm danh sách bài nguồn (tiêu đề, link, nguồn, ngày, tóm tắt) và một đoạn tổng quan
-  có trích dẫn `[1]`, `[2]`. Chỉ tìm trong các bài đã thu thập từ RSS.
-- Link mới được tải về, lưu vào nguồn "User-submitted links" (không hoạt động, RSS bỏ qua) và
-  hiển thị đầu tiên cùng các bài liên quan.
-- LLM mặc định là Gemma chạy local qua Ollama (miễn phí): cài Ollama, chạy
-  `ollama pull <model>` và đặt `LLM_MODEL` đúng tên model đã tải (kiểm tra bằng `ollama list`).
-  Dùng OpenAI: đặt `LLM_BASE_URL=https://api.openai.com/v1`, `LLM_MODEL`, `LLM_API_KEY`.
-- Tóm tắt AI được lưu vào cột `articles.ai_summary` và dùng lại. Khi LLM không chạy, hệ thống
-  vẫn trả kết quả với đoạn trích (`summary_method: "extractive"`) và không có tổng quan.
-
-## Windows: lỗi DLL khi khởi động
-
-Nếu traceback kết thúc bằng `An Application Control policy has blocked this file`
-khi import scikit-learn/BERTopic, Windows đã chặn một thư viện native (.pyd/DLL).
-Kiểm tra Event Viewer → Applications and Services Logs → Microsoft → Windows →
-CodeIntegrity → Operational, đặc biệt event 3077, để tìm file và policy liên quan.
-Không thể kết luận thiếu DLL hoặc sai phiên bản Python chỉ từ thông báo này.
-
-Route AI chỉ nạp thư viện ML khi gọi `POST /api/v1/ai/process`. Nếu dependency
-không nạp được, route trả 503; health, sources, RSS và baseline không cần BERTopic
-để khởi động. Đây là cô lập lỗi AI, không phải sửa chính sách Windows.
-
-Để khôi phục AI, cần môi trường Python và các gói native được chính sách máy cho
-phép; nhờ quản trị viên kiểm tra file/publisher và policy nếu máy được quản lý.
-Không tắt App Control để khắc phục. Python 3.12 là phiên bản mục tiêu trong Dockerfile;
-đổi phiên bản không bảo đảm giải quyết policy block. Sau khi môi trường được sửa:
-
-```powershell
-.\.venv\Scripts\python.exe -c "from sklearn.preprocessing import PolynomialFeatures; from bertopic import BERTopic; print('AI imports OK')"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
-```
-
-Kiểm thử hồi quy trên DB test tách biệt:
-
-```powershell
-$env:DATABASE_URL = 'sqlite://'
-.\.venv\Scripts\python.exe -m pytest -q tests/test_ai_availability.py
-Remove-Item Env:DATABASE_URL
-```
-
-## Kiến trúc và giới hạn đã biết
-
-Monolith có lớp (routes → services → repositories → models), không phải microservices.
-Đọc code theo thứ tự: `app/main.py` → `app/api/routes/` → `app/services/ingestion.py` →
-`app/services/analyzer.py` → `app/services/topic_model.py`.
-
-- Rate limit của `/ai/search` nằm trong bộ nhớ, mỗi process đếm riêng.
-- Job AI chạy trong process API (`BackgroundTasks`).
-- T1: còn lỗ DNS rebinding khi tải feed/bài; trình tải bài đọc cả body rồi mới so giới hạn
-  (chưa stream).
-- T2: kiểm tra job đang chạy và tạo job mới không nguyên tử; hai request đồng thời có thể
-  cùng tạo job.
-
+1. `app/main.py`: app, static UI, middleware.
+2. `app/api/routes/`: HTTP endpoints.
+3. `app/services/ingestion.py`: feeds to articles.
+4. `app/services/analyzer.py`: keyword analysis and extractive summaries.
+5. `app/services/topic_model.py`: embeddings + BERTopic batch.
+6. `app/services/news_search.py` and `app/services/hybrid_search.py`: search.

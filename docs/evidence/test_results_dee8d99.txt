@@ -1,0 +1,48 @@
+Test results: lint + full pytest suite, SQLite only (host Windows)
+===================================================================
+Date (UTC):   2026-11-01, pytest started 13:21, finished 13:24
+Commit:       dee8d99 (dee8d99e8baee14c8590e149dcdc0d18a8044966), branch docs/readme-final,
+              working tree clean when the commands ran
+Host:         Windows 11, project venv (.venv)
+Python:       3.14.7
+pytest:       8.4.2
+ruff:         0.16.9
+Environment:  TEST_POSTGRES_ADMIN_URL not set, so the PostgreSQL cases are skipped.
+
+Commands (from the repository root, venv active)
+  ruff check .
+  pytest -rs          (pyproject.toml already adds -q through addopts)
+
+Results
+  ruff check .  -> All checks passed!  (exit 0)
+  pytest -rs    -> 689 passed, 215 skipped, 0 failed, 31 warnings in 158.50s (0:02:38)  (exit 0)
+
+Skip reasons (all 215)
+  215  TEST_POSTGRES_ADMIN_URL is not set (no PostgreSQL test server)
+
+Skips per file
+  tests/test_admin_auth.py             47
+  tests/test_ai_job_lock.py             7
+  tests/test_ai_pipeline.py            19
+  tests/test_ai_search.py              40
+  tests/test_article_source_name.py     3
+  tests/test_ask_allow_links.py         5
+  tests/test_news_search.py            12
+  tests/test_source_sync_migration.py   1
+  tests/test_source_sync_status.py     17
+  tests/test_source_types.py            7
+  tests/test_source_update.py           8
+  tests/test_sources_regression.py     12
+  tests/test_topic_registry.py          4
+  tests/test_topic_timeseries.py       22
+  tests/test_trending.py               10
+  tests/test_web_ui_topics.py           1
+
+Notes
+  - tests/test_ai_pipeline.py ran its SQLite cases on this host (hdbscan imported; only the
+    PostgreSQL cases were skipped).
+  - Warnings are library deprecation/UserWarnings (starlette testclient, anyio, umap
+    n_jobs, HTTP_422 constant name); none come from a failing test.
+  - CI (.github/workflows/ci.yml) also runs the PostgreSQL cases; its numbers for this
+    commit are not recorded here.
+  - No passwords, tokens or keys appear in this file.
