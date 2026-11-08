@@ -14,12 +14,13 @@ from app.core.config import settings
 from app.models.article import Article
 from app.repositories.article import ArticleRepository
 from app.repositories.source import SourceRepository
-from app.services.ai_errors import EmbeddingModelUnavailableError
+from app.services.ai_errors import EmbeddingModelLoadingError, EmbeddingModelUnavailableError
 from app.services.analyzer import HeuristicAnalyzer
 from app.services.content_extractor import ArticleContentExtractor
-from app.services.embeddings import ArticleEmbedder, encode_queries, get_embedding_model
+from app.services.embeddings import ArticleEmbedder, encode_queries, get_query_model
 from app.services.hybrid_search import hybrid_order, keyword_scores
 from app.services.llm import LLMClient, LLMError
+from app.services.model_preload import ModelLoadingError
 from app.services.prompts import (
     ANSWER_SYSTEM,
     SUMMARY_SYSTEM,
@@ -230,9 +231,12 @@ class NewsSearchService:
         )
 
     def _embedding(self) -> tuple[object, ArticleEmbedder]:
+        """The model and an embedder; any load failure becomes a "model unavailable" error."""
         try:
-            model = get_embedding_model()
-        except OSError as exc:
+            model = get_query_model()
+        except ModelLoadingError as exc:
+            raise EmbeddingModelLoadingError from exc
+        except Exception as exc:
             raise EmbeddingModelUnavailableError from exc
 
         return model, ArticleEmbedder(self.articles, model)

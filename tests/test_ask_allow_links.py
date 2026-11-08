@@ -28,7 +28,7 @@ def offline_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fake model, extractor and LLM, as in test_news_search; links allowed by default."""
     llm_client = LLMClient(base_url="http://llm.test/v1", model="test-model", api_key="key",
                            timeout_seconds=5, transport=httpx.MockTransport(FakeLLM().handle))
-    monkeypatch.setattr(news_search, "get_embedding_model", lambda: FakeEmbedder())
+    monkeypatch.setattr(news_search, "get_query_model", lambda: FakeEmbedder())
     monkeypatch.setattr(news_search.LLMClient, "from_settings", classmethod(lambda cls: llm_client))
     monkeypatch.setattr(news_search, "ArticleContentExtractor", FakeExtractor)
     monkeypatch.setattr(news_search.settings, "ask_min_similarity", 0.5)
@@ -52,7 +52,7 @@ def network_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             raise AssertionError(f"{name} must not be called while links are disabled")
         return blocked
 
-    monkeypatch.setattr(news_search, "get_embedding_model", blocker("embedding model"))
+    monkeypatch.setattr(news_search, "get_query_model", blocker("embedding model"))
     monkeypatch.setattr(news_search, "ArticleContentExtractor", blocker("page extractor"))
     monkeypatch.setattr(news_search.LLMClient, "from_settings", classmethod(blocker("LLM")))
     # Real HTTP only; the TestClient uses its own in-process transport.

@@ -81,6 +81,24 @@ class AIJobRepository:
         job.finished_at = datetime.now(UTC)
         self.db.commit()
 
+    def fail_all_active(self, error: str) -> int:
+        """Fail every pending or running job and free its active_key, in one transaction.
+
+        Returns how many jobs were changed; calling it again changes nothing.
+        """
+        result = self.db.execute(
+            update(AIJob)
+            .where(AIJob.status.in_(ACTIVE_STATUSES))
+            .values(
+                status="failed",
+                error=error,
+                finished_at=datetime.now(UTC),
+                active_key=None,
+            )
+        )
+        self.db.commit()
+        return result.rowcount
+
     def release_active_key(self, job_id: str, error: str) -> None:
         """Last resort: fail the job if still active and free its active_key."""
         self.db.execute(

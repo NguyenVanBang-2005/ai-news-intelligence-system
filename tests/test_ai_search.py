@@ -45,7 +45,7 @@ class ForbiddenExtractor:
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(news_search, "get_embedding_model", lambda: FakeEmbedder())
+    monkeypatch.setattr(news_search, "get_query_model", lambda: FakeEmbedder())
     monkeypatch.setattr(news_search, "LLMClient", ForbiddenLLM)
     monkeypatch.setattr(news_search, "ArticleContentExtractor", ForbiddenExtractor)
     monkeypatch.setattr(news_search.settings, "ask_min_similarity", 0.5)
@@ -287,7 +287,7 @@ def test_a_link_is_refused_with_422(
     def no_model() -> None:
         pytest.fail("a link must be refused before the model is loaded")
 
-    monkeypatch.setattr(news_search, "get_embedding_model", no_model)
+    monkeypatch.setattr(news_search, "get_query_model", no_model)
 
     response = search(anonymous, link)
 
@@ -326,7 +326,7 @@ def test_missing_embedding_model_is_503(
     def unavailable() -> None:
         raise OSError("model files missing")
 
-    monkeypatch.setattr(news_search, "get_embedding_model", unavailable)
+    monkeypatch.setattr(news_search, "get_query_model", unavailable)
 
     assert search(anonymous, "G0 latest").status_code == 503
 

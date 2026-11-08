@@ -43,6 +43,15 @@ def no_model_preload(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_startup_job_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TestClient runs the lifespan; its job cleanup must not reach the database of a local
+    .env. Tests of the cleanup put the real function back (see test_startup_job_cleanup)."""
+    import app.main
+
+    monkeypatch.setattr(app.main, "fail_interrupted_jobs", lambda session_factory: None)
+
+
+@pytest.fixture(autouse=True)
 def fresh_search_rate_limit() -> Generator[None, None, None]:
     """The search rate limiter is process-wide; no test may inherit another's hits."""
     from app.api.deps import search_rate_limiter

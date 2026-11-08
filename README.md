@@ -85,8 +85,8 @@ Then open <http://127.0.0.1:8000/>. Health: `GET /api/v1/health` returns
 Notes:
 
 - `EMBEDDING_MODEL_NAME` must be the model above: the snapshot's embeddings and the search
-  threshold were made with it. The default in `app/core/config.py` is a different model
-  (`intfloat/multilingual-e5-base`); `.env.example` already sets the right one.
+  threshold were made with it. It is also the default in `app/core/config.py` and the value
+  in `.env.example`; setting it here only makes the command independent of a local `.env`.
 - `HF_HUB_OFFLINE=1` must be a real environment variable of the process. A line in `.env`
   is not enough: `.env` is read by the app's settings, not by the Hugging Face library.
   Offline mode needs the model already in the local Hugging Face cache; without it, the
@@ -126,7 +126,7 @@ Never commit `.env`.
 | `POSTGRES_PASSWORD` | placeholder `news` | Compose database password; the placeholder is for local development only, change it. If you change it and also run on the host with `DATABASE_URL`, change the password in `DATABASE_URL` too |
 | `API_PORT` | `8001` | Host port of the Compose API |
 | `ADMIN_API_TOKEN` | empty | Token for admin endpoints; empty means they answer 503. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Must be set: the code default is a different model |
+| `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Embedding model (same as the code default); the snapshot and the search thresholds were made with it |
 | `AI_PRELOAD_MODEL` | `true` | Load the model in the background at startup (code default `false`) |
 | `AI_SEARCH_MIN_SIMILARITY` | `0.5` | Public search: an article below this is shown only if it contains at least half of the query's distinct words (common words ignored); tuned with the model above |
 | `ASK_MIN_SIMILARITY` | `0.8` | Similarity floor for `/ai/ask` |
@@ -200,7 +200,10 @@ PostgreSQL tests.
 
 - Search rate limit is in memory, per process (several workers count separately).
 - Two "Rescan sources" runs at the same time are not locked against each other.
-- AI jobs run inside the API process; a restart loses a running job.
+- AI jobs run inside the API process; a restart loses a running job. At startup, jobs left
+  pending or running are marked failed ("Interrupted by application restart"), so a new
+  `POST /ai/process` can start at once instead of waiting out the 1-hour job timeout.
+  This assumes a single worker process.
 - The admin token is kept in the tab's `sessionStorage`: use it only on a trusted local machine.
 - `/docs` needs Internet (Swagger UI is loaded from a CDN); the main UI does not.
 - No automatic backups.

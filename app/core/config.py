@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     max_article_content_chars: int = Field(default=20_000, ge=1)
 
     # AI configuration
-    embedding_model_name: str = "intfloat/multilingual-e5-base"
+    # The model the evaluation snapshot and the search thresholds were made with.
+    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     ai_min_documents: int = Field(default=10, ge=2)
     ai_batch_size: int = Field(default=500, ge=2)
     duplicate_similarity_threshold: float = Field(default=0.92, ge=0, le=1)
