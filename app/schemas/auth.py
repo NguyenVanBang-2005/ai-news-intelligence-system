@@ -12,6 +12,25 @@ def normalize_username(value: str) -> str:
     return value.strip().lower()
 
 
+def validate_username(value: str) -> str:
+    """The normalized username, or ValueError if it breaks the account rules."""
+    username = normalize_username(value)
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise ValueError("username must be 3-32 characters of a-z, 0-9, _ . -")
+    return username
+
+
+def validate_password(password: str, username: str) -> str:
+    """The password unchanged, or ValueError if too short/long or equal to the username."""
+    if not PASSWORD_MIN_CHARS <= len(password) <= PASSWORD_MAX_CHARS:
+        raise ValueError(
+            f"password must be {PASSWORD_MIN_CHARS}-{PASSWORD_MAX_CHARS} characters"
+        )
+    if normalize_username(password) == username:
+        raise ValueError("password must not be the username")
+    return password
+
+
 class RegisterRequest(BaseModel):
     """Unknown fields such as "role" are rejected (422): nobody can pick their own role."""
 
@@ -23,15 +42,11 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def check_username(cls, value: str) -> str:
-        username = normalize_username(value)
-        if not USERNAME_PATTERN.fullmatch(username):
-            raise ValueError("username must be 3-32 characters of a-z, 0-9, _ . -")
-        return username
+        return validate_username(value)
 
     @model_validator(mode="after")
-    def password_differs_from_username(self) -> "RegisterRequest":
-        if normalize_username(self.password) == self.username:
-            raise ValueError("password must not be the username")
+    def check_password(self) -> "RegisterRequest":
+        validate_password(self.password, self.username)
         return self
 
 

@@ -32,6 +32,14 @@ class UserRepository:
             raise UsernameTakenError from exc
         return user
 
+    def grant_role_and_activate(self, user: User, *, role: str, password_hash: str | None) -> None:
+        """Give the user `role` and re-enable the account; replace the hash only if given."""
+        user.role = role
+        user.is_active = True
+        if password_hash is not None:
+            user.password_hash = password_hash
+        self.db.commit()
+
     def set_last_login(self, user: User, when: datetime) -> None:
         user.last_login_at = when
         self.db.commit()

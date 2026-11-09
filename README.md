@@ -133,6 +133,8 @@ Never commit `.env`.
 | `ASK_ALLOW_LINKS` | `false` | Whether `/ai/ask` accepts a link and downloads it (code default `true`) |
 | `INGESTION_FULL_TEXT` | `false` | Download the article page when the feed gives only a short snippet (code default `true`) |
 | `AI_SEARCH_RATE_PER_MINUTE` | `30` | Public search requests per client IP per minute, counted per process; over it: 429 with `Retry-After` |
+| `AI_SEARCH_USER_RATE_PER_MINUTE` | `120` | Same, for signed-in users (user or admin), counted per account instead of per IP |
+| `SESSION_COOKIE_SECURE` | `false` | Send the session cookie over HTTPS only; set `true` when served over HTTPS |
 | `AI_SEARCH_MAX_BODY_BYTES` | `4096` | Largest accepted search request body |
 
 The LLM for `/ai/ask` is any OpenAI-compatible API (`LLM_BASE_URL`, `LLM_MODEL`,
@@ -153,11 +155,36 @@ All API paths are under `/api/v1`.
 | Access | Endpoints |
 |---|---|
 | Public | `GET /health`, `GET /sources`, `GET /articles`, `GET /articles/{id}`, `GET /topics/trending`, `GET /topics/timeseries`, `GET /ai/topics`, `POST /ai/search` (rate limited) |
-| Admin (`X-Admin-Token`) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
+| Admin (`X-Admin-Token` or an admin session) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
 
-Admin endpoints answer **401** when the token is missing or wrong, and **503** when the
-server has no `ADMIN_API_TOKEN`. Deleting a source also deletes its articles.
+Without a signed-in session, admin endpoints answer **401** when the token is missing or
+wrong, and **503** when the server has no `ADMIN_API_TOKEN`. Deleting a source also deletes
+its articles.
 UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
+
+## Accounts and roles
+
+- Endpoints: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+  Login sets an HttpOnly, `SameSite=Strict` session cookie (12 hours, `SESSION_TTL_HOURS`);
+  the database keeps only a SHA-256 of the session token. Passwords are hashed with scrypt.
+- Two roles: `user` and `admin`. Registration always creates a `user`; no API endpoint
+  changes a role. An `admin` session can call the admin endpoints above; a `user` session
+  gets 403 there.
+- Create the first admin (or promote an existing account) with the script; it asks for the
+  password twice without showing it (or reads `AINIS_NEW_ADMIN_PASSWORD`). An existing
+  account keeps its password unless you add `--reset-password`.
+
+  ```bash
+  python scripts/create_admin.py --username <name>                               # host
+  docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>  # Docker
+  ```
+
+- `X-Admin-Token` still works as a service key for scripts. When the header is present only
+  the token is checked (cookies are ignored).
+- With a session cookie, admin `POST`/`PATCH`/`DELETE` requests must send
+  `X-Requested-With: ainis`, and an `Origin` header (if any) must match the host; otherwise 403.
+- Search limit by role: anonymous 30 per minute per IP (`AI_SEARCH_RATE_PER_MINUTE`), signed-in
+  users 120 per minute per account (`AI_SEARCH_USER_RATE_PER_MINUTE`).
 
 ## Evaluation
 
@@ -198,7 +225,13 @@ PostgreSQL tests.
 
 ## Known limitations
 
-- Search rate limit is in memory, per process (several workers count separately).
+- Search, login and registration rate limits are in memory, per process: they are exact
+  only with a single worker (several workers count separately).
+- Registering a username that exists answers 409, so anyone can find out which usernames exist.
+- With `SESSION_COOKIE_SECURE=false` (the default, for plain HTTP) the session cookie is also
+  sent over unencrypted HTTP.
+- No password recovery, and no account management through the API (listing, disabling or
+  changing the role of accounts); only `scripts/create_admin.py` creates or promotes admins.
 - Two "Rescan sources" runs at the same time are not locked against each other.
 - AI jobs run inside the API process; a restart loses a running job. At startup, jobs left
   pending or running are marked failed ("Interrupted by application restart"), so a new

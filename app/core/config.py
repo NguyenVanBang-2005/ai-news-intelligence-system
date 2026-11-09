@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     # Public search (POST /ai/search): requests per client IP per minute (per process),
     # and the largest accepted request body.
     ai_search_rate_per_minute: int = Field(default=30, ge=1)
+    # Signed-in users (any role) are counted per user id instead, with this higher limit.
+    ai_search_user_rate_per_minute: int = Field(default=120, ge=1)
     ai_search_max_body_bytes: int = Field(default=4096, ge=1)
     # Public search floor, separate from ask_min_similarity (/ai/ask keeps 0.8): an article
     # less similar than this is shown only if it contains a query word. Short queries like

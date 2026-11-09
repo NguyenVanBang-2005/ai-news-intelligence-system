@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import DbSession, limit_search_rate, require_admin
+from app.api.deps import DbSession, limit_search_rate_by_role, require_admin
 from app.schemas.ask import (
     AiSearchRequest,
     AiSearchResponse,
@@ -65,11 +65,12 @@ def ask(payload: AskRequest, db: DbSession) -> AskResponse:
 @router.post(
     "/search",
     response_model=AiSearchResponse,
-    dependencies=[Depends(limit_search_rate)],
+    dependencies=[Depends(limit_search_rate_by_role)],
 )
 def search(payload: AiSearchRequest, db: DbSession) -> AiSearchResponse:
     """Public search in the stored articles. Never downloads links, calls the LLM or
-    embeds articles; rate limited per IP and body size capped (see app.main)."""
+    embeds articles; rate limited per IP, or per user when signed in, and body size
+    capped (see app.main)."""
 
     try:
         from app.services.news_search import LinkNotAllowedError, NewsSearchService
