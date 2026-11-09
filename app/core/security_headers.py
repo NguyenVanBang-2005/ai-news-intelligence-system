@@ -1,6 +1,6 @@
 """ASGI middleware that adds basic security headers to every HTTP response.
 
-The web UI ("/" and "/static/...") also gets a strict Content-Security-Policy: it has no
+The web UI ("/", "/admin/" and "/static/...") also gets a strict Content-Security-Policy: it has no
 inline script or style. /docs and /redoc load Swagger UI and ReDoc from a CDN with inline
 script, and /api/* returns JSON, so the CSP is not applied to them.
 """
@@ -31,7 +31,7 @@ CONTENT_SECURITY_POLICY = "; ".join([
 
 def is_web_ui_path(path: str) -> bool:
     """True for the pages and files of the web UI, which get the CSP."""
-    return path == "/" or path.startswith("/static/")
+    return path in ("/", "/admin/") or path.startswith("/static/")
 
 
 class SecurityHeadersMiddleware:

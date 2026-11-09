@@ -12,7 +12,7 @@ A backend and web UI that collects AI news and organises it:
 - **Summaries**: extractive (sentences taken from the article).
 - **Trending**: topics with more articles in the last hours than their usual rate.
 - **Search**: hybrid semantic + keyword search over stored articles (`POST /api/v1/ai/search`).
-- **LLM**: used only by `POST /api/v1/ai/ask`, which is optional and needs the admin token.
+- **LLM**: used only by `POST /api/v1/ai/ask`, which is optional and needs admin access.
 
 **Architecture**: one FastAPI application, a layered monolith:
 `routes -> services -> repositories -> models`. `app/services/` holds Python modules,
@@ -106,7 +106,14 @@ docker compose up -d --build
 - API and UI on <http://127.0.0.1:8001/> (`API_PORT`, default 8001). The DB is published on
   `127.0.0.1:${POSTGRES_PORT}` only through `compose.override.yaml` (local development).
 - The image installs `requirements.txt`, so it **has the ML libraries**. The embedding model
-  is **not** in the image: it is downloaded on first use (needs Internet).
+  is **downloaded into the image at build time** (`docker compose up --build` needs Internet),
+  in its own layer after `pip install` and before the app code is copied, into
+  `HF_HOME=/opt/hf-cache`. The Dockerfile build argument `EMBEDDING_MODEL_NAME` picks the model
+  (default: the same as the code). `compose.yaml` sets `HF_HUB_OFFLINE=1` unless you override
+  it, so the running API never downloads a model.
+- Create the first admin account (see [Accounts and roles](#accounts-and-roles)):
+  `docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>`
+  (the container name depends on your Compose project name; see `docker compose ps`).
 - A fresh stack has an **empty database**: no articles and no topics until you add sources,
   run ingestion (`POST /api/v1/ingestion/run`) and then `POST /api/v1/ai/process`.
 - Database setup, backup and restore: [docs/database.md](docs/database.md).
@@ -146,9 +153,15 @@ Web UI (same origin as the API, no build step):
 
 - **Search** (`/`, `#/search`): hybrid search, trending chips, article detail drawer.
 - **Topics** (`#/topics`): topic cards, a daily chart of trending topics, article list per topic.
-- **Sources** (`#/sources`): source list; with an admin token, add/disable/delete sources and
-  "Rescan sources" (runs ingestion).
+- **Sources** (`#/sources`): read-only source list (name, type, language, sync status) and the
+  latest classified articles.
 - **API** (`/docs`): Swagger UI.
+- **Log in / Register** (top right): a dialog; once signed in the bar shows the username, the
+  role and "Log out", plus an **Admin** link for admins. There is no admin token input anywhere.
+- **Admin** (`/admin/`, admin role only): source list with sync status, add an RSS/Atom source,
+  delete a source (after a confirmation), run ingestion for all sources or one source, and
+  start AI processing and follow the job until it finishes. Signed out, it says "Log in as an
+  administrator"; a `user` account sees "Administrator role required".
 
 All API paths are under `/api/v1`.
 
@@ -237,7 +250,7 @@ PostgreSQL tests.
   pending or running are marked failed ("Interrupted by application restart"), so a new
   `POST /ai/process` can start at once instead of waiting out the 1-hour job timeout.
   This assumes a single worker process.
-- The admin token is kept in the tab's `sessionStorage`: use it only on a trusted local machine.
+- The admin page cannot turn a source on or off; `PATCH /sources/{id}` is API only.
 - `/docs` needs Internet (Swagger UI is loaded from a CDN); the main UI does not.
 - No automatic backups.
 - The PNG logo looks blurry on 2x screens.

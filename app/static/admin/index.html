@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · AINIS</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/admin/admin.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img class="brand-logo" src="/static/img/logo.png" alt="AINIS - AI News Intelligence" width="280" height="58">
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link" href="/">Back to site</a>
+      <a class="nav-link active" href="/admin/" aria-current="page">Admin</a>
+    </nav>
+    <div class="account" id="account"></div>
+  </header>
+
+  <main id="admin" class="app" tabindex="-1">
+    <noscript><p class="noscript">The admin page needs JavaScript.</p></noscript>
+  </main>
+
+  <footer class="footer">
+    <span>AINIS · Administration</span>
+    <span>Only accounts with the admin role can use this page.</span>
+  </footer>
+</body>
+</html>

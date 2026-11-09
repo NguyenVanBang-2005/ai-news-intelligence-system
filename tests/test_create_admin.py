@@ -1,6 +1,8 @@
 """scripts/create_admin.py on SQLite: create, promote, validation, output, then login."""
 
 import importlib.util
+import subprocess
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from app.core.config import settings
 from app.db.session import Base
 from app.models.user import User
 from app.services.auth import create_or_promote_admin, register_user
+from tests.db_isolation import isolated_env
 from tests.pg_support import client_for
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "create_admin.py"
@@ -131,3 +134,16 @@ def test_created_admin_can_log_in(factory, sqlite_engine, monkeypatch) -> None:
         )
         assert response.status_code == 200
         assert response.json()["role"] == "admin"
+
+
+def test_script_help_runs_from_the_repo_root_without_pythonpath(tmp_path: Path) -> None:
+    # A fresh interpreter, as `python scripts/create_admin.py` or `docker exec` would run it.
+    env = isolated_env(f"sqlite:///{(tmp_path / 'unused.db').as_posix()}")
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        cwd=SCRIPT.parents[1], env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--username" in result.stdout and "--reset-password" in result.stdout
+    assert not (tmp_path / "unused.db").exists()  # --help never opens the database

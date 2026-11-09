@@ -17,6 +17,7 @@ from app.services.ai_jobs import fail_interrupted_jobs
 
 STATIC_DIR = Path(__file__).parent / "static"
 SEARCH_PAGE = STATIC_DIR / "index.html"
+ADMIN_PAGE = STATIC_DIR / "admin" / "index.html"
 
 
 def startup_session_factory(fastapi_app: FastAPI) -> sessionmaker[Session]:
@@ -59,3 +60,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 def search_page() -> FileResponse:
     """The news search page. The API itself is documented at /docs."""
     return FileResponse(SEARCH_PAGE)
+
+
+@app.get("/admin/", include_in_schema=False)
+def admin_page() -> FileResponse:
+    """The admin dashboard. The page itself is public; its API calls need an admin session."""
+    return FileResponse(ADMIN_PAGE)
