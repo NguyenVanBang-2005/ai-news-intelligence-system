@@ -12,7 +12,7 @@ A backend and web UI that collects AI news and organises it:
 - **Summaries**: extractive (sentences taken from the article).
 - **Trending**: topics with more articles in the last hours than their usual rate.
 - **Search**: hybrid semantic + keyword search over stored articles (`POST /api/v1/ai/search`).
-- **LLM**: used only by `POST /api/v1/ai/ask`, which is optional and needs the admin token.
+- **LLM**: used only by `POST /api/v1/ai/ask`, which is optional and needs admin access.
 
 **Architecture**: one FastAPI application, a layered monolith:
 `routes -> services -> repositories -> models`. `app/services/` holds Python modules,
@@ -85,8 +85,8 @@ Then open <http://127.0.0.1:8000/>. Health: `GET /api/v1/health` returns
 Notes:
 
 - `EMBEDDING_MODEL_NAME` must be the model above: the snapshot's embeddings and the search
-  threshold were made with it. The default in `app/core/config.py` is a different model
-  (`intfloat/multilingual-e5-base`); `.env.example` already sets the right one.
+  threshold were made with it. It is also the default in `app/core/config.py` and the value
+  in `.env.example`; setting it here only makes the command independent of a local `.env`.
 - `HF_HUB_OFFLINE=1` must be a real environment variable of the process. A line in `.env`
   is not enough: `.env` is read by the app's settings, not by the Hugging Face library.
   Offline mode needs the model already in the local Hugging Face cache; without it, the
@@ -106,7 +106,14 @@ docker compose up -d --build
 - API and UI on <http://127.0.0.1:8001/> (`API_PORT`, default 8001). The DB is published on
   `127.0.0.1:${POSTGRES_PORT}` only through `compose.override.yaml` (local development).
 - The image installs `requirements.txt`, so it **has the ML libraries**. The embedding model
-  is **not** in the image: it is downloaded on first use (needs Internet).
+  is **downloaded into the image at build time** (`docker compose up --build` needs Internet),
+  in its own layer after `pip install` and before the app code is copied, into
+  `HF_HOME=/opt/hf-cache`. The Dockerfile build argument `EMBEDDING_MODEL_NAME` picks the model
+  (default: the same as the code). `compose.yaml` sets `HF_HUB_OFFLINE=1` unless you override
+  it, so the running API never downloads a model.
+- Create the first admin account (see [Accounts and roles](#accounts-and-roles)):
+  `docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>`
+  (the container name depends on your Compose project name; see `docker compose ps`).
 - A fresh stack has an **empty database**: no articles and no topics until you add sources,
   run ingestion (`POST /api/v1/ingestion/run`) and then `POST /api/v1/ai/process`.
 - Database setup, backup and restore: [docs/database.md](docs/database.md).
@@ -126,13 +133,15 @@ Never commit `.env`.
 | `POSTGRES_PASSWORD` | placeholder `news` | Compose database password; the placeholder is for local development only, change it. If you change it and also run on the host with `DATABASE_URL`, change the password in `DATABASE_URL` too |
 | `API_PORT` | `8001` | Host port of the Compose API |
 | `ADMIN_API_TOKEN` | empty | Token for admin endpoints; empty means they answer 503. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Must be set: the code default is a different model |
+| `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Embedding model (same as the code default); the snapshot and the search thresholds were made with it |
 | `AI_PRELOAD_MODEL` | `true` | Load the model in the background at startup (code default `false`) |
 | `AI_SEARCH_MIN_SIMILARITY` | `0.5` | Public search: an article below this is shown only if it contains at least half of the query's distinct words (common words ignored); tuned with the model above |
 | `ASK_MIN_SIMILARITY` | `0.8` | Similarity floor for `/ai/ask` |
 | `ASK_ALLOW_LINKS` | `false` | Whether `/ai/ask` accepts a link and downloads it (code default `true`) |
 | `INGESTION_FULL_TEXT` | `false` | Download the article page when the feed gives only a short snippet (code default `true`) |
 | `AI_SEARCH_RATE_PER_MINUTE` | `30` | Public search requests per client IP per minute, counted per process; over it: 429 with `Retry-After` |
+| `AI_SEARCH_USER_RATE_PER_MINUTE` | `120` | Same, for signed-in users (user or admin), counted per account instead of per IP |
+| `SESSION_COOKIE_SECURE` | `false` | Send the session cookie over HTTPS only; set `true` when served over HTTPS |
 | `AI_SEARCH_MAX_BODY_BYTES` | `4096` | Largest accepted search request body |
 
 The LLM for `/ai/ask` is any OpenAI-compatible API (`LLM_BASE_URL`, `LLM_MODEL`,
@@ -144,20 +153,51 @@ Web UI (same origin as the API, no build step):
 
 - **Search** (`/`, `#/search`): hybrid search, trending chips, article detail drawer.
 - **Topics** (`#/topics`): topic cards, a daily chart of trending topics, article list per topic.
-- **Sources** (`#/sources`): source list; with an admin token, add/disable/delete sources and
-  "Rescan sources" (runs ingestion).
+- **Sources** (`#/sources`): read-only source list (name, type, language, sync status) and the
+  latest classified articles.
 - **API** (`/docs`): Swagger UI.
+- **Log in / Register** (top right): a dialog; once signed in the bar shows the username, the
+  role and "Log out", plus an **Admin** link for admins. There is no admin token input anywhere.
+- **Admin** (`/admin/`, admin role only): source list with sync status, add an RSS/Atom source,
+  delete a source (after a confirmation), run ingestion for all sources or one source, and
+  start AI processing and follow the job until it finishes. Signed out, it says "Log in as an
+  administrator"; a `user` account sees "Administrator role required".
 
 All API paths are under `/api/v1`.
 
 | Access | Endpoints |
 |---|---|
 | Public | `GET /health`, `GET /sources`, `GET /articles`, `GET /articles/{id}`, `GET /topics/trending`, `GET /topics/timeseries`, `GET /ai/topics`, `POST /ai/search` (rate limited) |
-| Admin (`X-Admin-Token`) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
+| Admin (`X-Admin-Token` or an admin session) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
 
-Admin endpoints answer **401** when the token is missing or wrong, and **503** when the
-server has no `ADMIN_API_TOKEN`. Deleting a source also deletes its articles.
+Without a signed-in session, admin endpoints answer **401** when the token is missing or
+wrong, and **503** when the server has no `ADMIN_API_TOKEN`. Deleting a source also deletes
+its articles.
 UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
+
+## Accounts and roles
+
+- Endpoints: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+  Login sets an HttpOnly, `SameSite=Strict` session cookie (12 hours, `SESSION_TTL_HOURS`);
+  the database keeps only a SHA-256 of the session token. Passwords are hashed with scrypt.
+- Two roles: `user` and `admin`. Registration always creates a `user`; no API endpoint
+  changes a role. An `admin` session can call the admin endpoints above; a `user` session
+  gets 403 there.
+- Create the first admin (or promote an existing account) with the script; it asks for the
+  password twice without showing it (or reads `AINIS_NEW_ADMIN_PASSWORD`). An existing
+  account keeps its password unless you add `--reset-password`.
+
+  ```bash
+  python scripts/create_admin.py --username <name>                               # host
+  docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>  # Docker
+  ```
+
+- `X-Admin-Token` still works as a service key for scripts. When the header is present only
+  the token is checked (cookies are ignored).
+- With a session cookie, admin `POST`/`PATCH`/`DELETE` requests must send
+  `X-Requested-With: ainis`, and an `Origin` header (if any) must match the host; otherwise 403.
+- Search limit by role: anonymous 30 per minute per IP (`AI_SEARCH_RATE_PER_MINUTE`), signed-in
+  users 120 per minute per account (`AI_SEARCH_USER_RATE_PER_MINUTE`).
 
 ## Evaluation
 
@@ -198,10 +238,19 @@ PostgreSQL tests.
 
 ## Known limitations
 
-- Search rate limit is in memory, per process (several workers count separately).
+- Search, login and registration rate limits are in memory, per process: they are exact
+  only with a single worker (several workers count separately).
+- Registering a username that exists answers 409, so anyone can find out which usernames exist.
+- With `SESSION_COOKIE_SECURE=false` (the default, for plain HTTP) the session cookie is also
+  sent over unencrypted HTTP.
+- No password recovery, and no account management through the API (listing, disabling or
+  changing the role of accounts); only `scripts/create_admin.py` creates or promotes admins.
 - Two "Rescan sources" runs at the same time are not locked against each other.
-- AI jobs run inside the API process; a restart loses a running job.
-- The admin token is kept in the tab's `sessionStorage`: use it only on a trusted local machine.
+- AI jobs run inside the API process; a restart loses a running job. At startup, jobs left
+  pending or running are marked failed ("Interrupted by application restart"), so a new
+  `POST /ai/process` can start at once instead of waiting out the 1-hour job timeout.
+  This assumes a single worker process.
+- The admin page cannot turn a source on or off; `PATCH /sources/{id}` is API only.
 - `/docs` needs Internet (Swagger UI is loaded from a CDN); the main UI does not.
 - No automatic backups.
 - The PNG logo looks blurry on 2x screens.

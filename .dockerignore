@@ -21,3 +21,5 @@ dist
 tests
 .docker-test
 .env-backup
+
+local-data/

@@ -5,20 +5,32 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.router import api_router
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.db.session import get_session_factory
 from app.services import model_preload
+from app.services.ai_jobs import fail_interrupted_jobs
 
 STATIC_DIR = Path(__file__).parent / "static"
 SEARCH_PAGE = STATIC_DIR / "index.html"
+ADMIN_PAGE = STATIC_DIR / "admin" / "index.html"
+
+
+def startup_session_factory(fastapi_app: FastAPI) -> sessionmaker[Session]:
+    """The session factory requests use, honouring dependency overrides (tests)."""
+    provider = fastapi_app.dependency_overrides.get(get_session_factory, get_session_factory)
+    return provider()
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """With AI_PRELOAD_MODEL, start loading the search model without delaying startup."""
+async def lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
+    """Before serving, fail AI jobs a previous run left unfinished; with AI_PRELOAD_MODEL,
+    start loading the search model without delaying startup."""
+    fail_interrupted_jobs(startup_session_factory(fastapi_app))
     if settings.ai_preload_model:
         model_preload.embedding_model.start_background_load()
     yield
@@ -48,3 +60,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 def search_page() -> FileResponse:
     """The news search page. The API itself is documented at /docs."""
     return FileResponse(SEARCH_PAGE)
+
+
+@app.get("/admin/", include_in_schema=False)
+def admin_page() -> FileResponse:
+    """The admin dashboard. The page itself is public; its API calls need an admin session."""
+    return FileResponse(ADMIN_PAGE)

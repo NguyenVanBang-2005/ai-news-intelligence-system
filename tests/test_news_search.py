@@ -88,7 +88,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     llm = FakeLLM()
     client = LLMClient(base_url="http://llm.test/v1", model="test-model", api_key="key",
                        timeout_seconds=5, transport=httpx.MockTransport(llm.handle))
-    monkeypatch.setattr(news_search, "get_embedding_model", lambda: FakeEmbedder())
+    monkeypatch.setattr(news_search, "get_query_model", lambda: FakeEmbedder())
     monkeypatch.setattr(news_search.LLMClient, "from_settings", classmethod(lambda cls: client))
     monkeypatch.setattr(news_search, "ArticleContentExtractor", FakeExtractor)
     monkeypatch.setattr(news_search.settings, "ask_min_similarity", 0.5)
@@ -249,7 +249,7 @@ def test_missing_embedding_model_is_503(
     def broken() -> None:
         raise OSError("no network")
 
-    monkeypatch.setattr(news_search, "get_embedding_model", broken)
+    monkeypatch.setattr(news_search, "get_query_model", broken)
 
     response = ask(client, "latest on G0")
 

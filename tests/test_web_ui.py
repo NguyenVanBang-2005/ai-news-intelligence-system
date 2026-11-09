@@ -118,10 +118,13 @@ def test_the_expected_modules_exist() -> None:
     assert {"app.js", "js/api.js", "js/dom.js", "js/format.js", "js/router.js",
             "js/components.js", "js/pages/search.js", "js/trending.js", "js/drawer.js",
             "js/pages/search-results.js", "js/pages/trending-ui.js",
-            "js/pages/article-drawer.js", "js/focus-trap.js", "js/admin-token.js",
-            "js/confirm-dialog.js", "js/pages/sources.js", "js/pages/admin-access.js",
-            "js/pages/rescan.js", "js/pages/source-form.js", "js/pages/source-list.js",
-            "js/pages/source-status.js", "js/pages/classified-list.js"} <= names
+            "js/pages/article-drawer.js", "js/focus-trap.js",
+            "js/confirm-dialog.js", "js/pages/sources.js",
+            "js/pages/source-status.js", "js/pages/classified-list.js",
+            "js/auth.js", "js/auth-dialog.js", "js/account-bar.js",
+            "admin/admin.js", "admin/admin-api.js", "admin/sources-admin.js",
+            "admin/source-add-form.js", "admin/ingestion-admin.js",
+            "admin/ai-process-admin.js"} <= names
 
 
 def test_every_static_reference_in_index_exists() -> None:
@@ -220,7 +223,7 @@ def test_search_timeout_is_longer_than_the_default() -> None:
     assert "timeoutMs: SEARCH_TIMEOUT_MS" in search_page
 
 
-@pytest.mark.parametrize("path", JS_DIR_FILES + [STATIC_DIR / "app.js"], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", JS_FILES, ids=lambda p: p.name)
 def test_scripts_never_write_html_or_eval(path) -> None:
     source = path.read_text(encoding="utf-8")
 
@@ -228,13 +231,10 @@ def test_scripts_never_write_html_or_eval(path) -> None:
         assert forbidden not in source, f"{path.name} contains {forbidden}"
 
 
-# --- admin token and the Sources page ----------------------------------------------------
+# --- session cookie instead of an admin token; the Sources page -------------------------
 
-ALL_JS = JS_DIR_FILES + [STATIC_DIR / "app.js"]
-# The only files allowed to name the admin header: api.js sends it, admin-token.js owns the token.
-ADMIN_HEADER_FILES = {"api.js", "admin-token.js"}
-# The only files allowed to use sessionStorage: the token and the last rescan result.
-SESSION_STORAGE_FILES = {"admin-token.js", "rescan.js"}
+# Every script, public (js/, app.js) and admin (admin/).
+ALL_JS = JS_FILES
 
 
 @pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
@@ -247,15 +247,14 @@ def test_scripts_never_use_local_storage_or_console_log(path) -> None:
 
 
 @pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
-def test_only_api_and_token_modules_name_the_admin_header(path) -> None:
-    if path.name not in ADMIN_HEADER_FILES:
-        assert "X-Admin-Token" not in path.read_text(encoding="utf-8")
+def test_no_script_names_the_admin_header(path) -> None:
+    # The UI signs in with the session cookie; X-Admin-Token is for scripts only.
+    assert "X-Admin-Token" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
-def test_only_token_and_rescan_modules_use_session_storage(path) -> None:
-    if path.name not in SESSION_STORAGE_FILES:
-        assert "sessionStorage" not in path.read_text(encoding="utf-8")
+def test_no_script_uses_session_storage(path) -> None:
+    assert "sessionStorage" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("path", ALL_JS, ids=lambda p: p.name)
@@ -267,7 +266,7 @@ def test_scripts_never_use_the_browser_confirm_box(path) -> None:
 
 
 def test_rescan_has_its_own_long_timeout() -> None:
-    rescan = STATIC_DIR / "js" / "pages" / "rescan.js"
+    rescan = STATIC_DIR / "admin" / "ingestion-admin.js"
 
     assert js_constant(rescan, "RESCAN_TIMEOUT_MS") == 180000
     assert "timeoutMs: RESCAN_TIMEOUT_MS" in rescan.read_text(encoding="utf-8")
@@ -280,7 +279,7 @@ def test_sources_route_shows_the_sources_page() -> None:
 
 
 def test_delete_always_asks_first() -> None:
-    source_list = (STATIC_DIR / "js" / "pages" / "source-list.js").read_text(encoding="utf-8")
+    source_list = (STATIC_DIR / "admin" / "sources-admin.js").read_text(encoding="utf-8")
 
     assert source_list.count('method: "DELETE"') == 1
     assert "permanently deletes all of its articles" in source_list

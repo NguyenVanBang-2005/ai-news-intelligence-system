@@ -11,6 +11,8 @@ x-app: &app
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     POSTGRES_DB: ${POSTGRES_DB:-news}
     TZ: UTC
+    # The embedding model is baked into the image (Dockerfile); never download at runtime.
+    HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
 
 services:
   db:
@@ -52,6 +54,13 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      # python:3.12-slim has no curl; liveness only (model_ready is not required).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     restart: unless-stopped
 
 volumes:

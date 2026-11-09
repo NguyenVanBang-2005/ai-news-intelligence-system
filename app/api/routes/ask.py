@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import DbSession, limit_search_rate, require_admin
+from app.api.deps import DbSession, limit_search_rate_by_role, require_admin
 from app.schemas.ask import (
     AiSearchRequest,
     AiSearchResponse,
@@ -10,7 +10,10 @@ from app.schemas.ask import (
 )
 from app.services.ai_errors import (
     AI_DEPENDENCIES_MISSING_MESSAGE,
+    MODEL_LOADING_MESSAGE,
+    MODEL_LOADING_RETRY_AFTER_SECONDS,
     MODEL_UNAVAILABLE_MESSAGE,
+    EmbeddingModelLoadingError,
     EmbeddingModelUnavailableError,
 )
 
@@ -48,11 +51,10 @@ def ask(payload: AskRequest, db: DbSession) -> AskResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except EmbeddingModelLoadingError as exc:
+        raise model_loading_error() from exc
     except EmbeddingModelUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=MODEL_UNAVAILABLE_MESSAGE,
-        ) from exc
+        raise model_unavailable_error() from exc
 
     return AskResponse(
         answer=result.answer,
@@ -63,11 +65,12 @@ def ask(payload: AskRequest, db: DbSession) -> AskResponse:
 @router.post(
     "/search",
     response_model=AiSearchResponse,
-    dependencies=[Depends(limit_search_rate)],
+    dependencies=[Depends(limit_search_rate_by_role)],
 )
 def search(payload: AiSearchRequest, db: DbSession) -> AiSearchResponse:
     """Public search in the stored articles. Never downloads links, calls the LLM or
-    embeds articles; rate limited per IP and body size capped (see app.main)."""
+    embeds articles; rate limited per IP, or per user when signed in, and body size
+    capped (see app.main)."""
 
     try:
         from app.services.news_search import LinkNotAllowedError, NewsSearchService
@@ -84,13 +87,29 @@ def search(payload: AiSearchRequest, db: DbSession) -> AiSearchResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except EmbeddingModelLoadingError as exc:
+        raise model_loading_error() from exc
     except EmbeddingModelUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=MODEL_UNAVAILABLE_MESSAGE,
-        ) from exc
+        raise model_unavailable_error() from exc
 
     return AiSearchResponse(sources=[_ask_source(source) for source in sources])
+
+
+def model_loading_error() -> HTTPException:
+    """503 asking the client to retry once the embedding model has finished loading."""
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=MODEL_LOADING_MESSAGE,
+        headers={"Retry-After": str(MODEL_LOADING_RETRY_AFTER_SECONDS)},
+    )
+
+
+def model_unavailable_error() -> HTTPException:
+    """503 for a model that could not be loaded."""
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=MODEL_UNAVAILABLE_MESSAGE,
+    )
 
 
 def _ask_source(source) -> AskSource:

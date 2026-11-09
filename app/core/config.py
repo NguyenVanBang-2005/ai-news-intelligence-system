@@ -20,13 +20,28 @@ class Settings(BaseSettings):
     # Shared secret for write and costly endpoints (X-Admin-Token header).
     # Unset or empty: those endpoints answer 503 instead of running unprotected.
     admin_api_token: str | None = None
+
+    # User sign-in (app/services/auth.py). The cookie holds a random token; the database
+    # stores only its SHA-256. Set SESSION_COOKIE_SECURE=true when served over HTTPS.
+    session_cookie_name: str = "ainis_session"
+    session_ttl_hours: int = Field(default=12, ge=1)
+    session_cookie_secure: bool = False
+    # scrypt cost; a power of two. Tests lower it so hashing is fast.
+    password_scrypt_n: int = Field(default=32768, ge=2)
+    # Per username + client address, in memory per process (like the search limiter).
+    auth_login_max_failures: int = Field(default=5, ge=1)
+    auth_login_window_seconds: int = Field(default=900, ge=1)
+    # Registrations per client address per hour (per process).
+    auth_register_per_hour: int = Field(default=5, ge=1)
+
     request_timeout_seconds: float = Field(default=15, gt=0)
     max_feed_items: int = Field(default=50, ge=1)
     max_feed_bytes: int = Field(default=2_000_000, ge=1)
     max_article_content_chars: int = Field(default=20_000, ge=1)
 
     # AI configuration
-    embedding_model_name: str = "intfloat/multilingual-e5-base"
+    # The model the evaluation snapshot and the search thresholds were made with.
+    embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     ai_min_documents: int = Field(default=10, ge=2)
     ai_batch_size: int = Field(default=500, ge=2)
     duplicate_similarity_threshold: float = Field(default=0.92, ge=0, le=1)
@@ -61,6 +76,8 @@ class Settings(BaseSettings):
     # Public search (POST /ai/search): requests per client IP per minute (per process),
     # and the largest accepted request body.
     ai_search_rate_per_minute: int = Field(default=30, ge=1)
+    # Signed-in users (any role) are counted per user id instead, with this higher limit.
+    ai_search_user_rate_per_minute: int = Field(default=120, ge=1)
     ai_search_max_body_bytes: int = Field(default=4096, ge=1)
     # Public search floor, separate from ask_min_similarity (/ai/ask keeps 0.8): an article
     # less similar than this is shown only if it contains a query word. Short queries like
@@ -113,6 +130,13 @@ class Settings(BaseSettings):
     def check_ai_limits(self) -> "Settings":
         if self.ai_batch_size < self.ai_min_documents:
             raise ValueError("AI_BATCH_SIZE must be >= AI_MIN_DOCUMENTS")
+        return self
+
+    @model_validator(mode="after")
+    def check_scrypt_cost(self) -> "Settings":
+        n = self.password_scrypt_n
+        if n & (n - 1) != 0:
+            raise ValueError("PASSWORD_SCRYPT_N must be a power of two")
         return self
 
 

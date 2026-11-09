@@ -37,7 +37,9 @@ export function errorMessage(error) {
     case "unavailable":
       return "The service is not ready yet.";
     case "unauthorized":
-      return "This action needs a valid admin token.";
+      return "Please log in.";
+    case "forbidden":
+      return "You do not have permission to do this.";
     case "not_found":
       return "Not found.";
     case "network":

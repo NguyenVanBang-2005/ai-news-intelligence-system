@@ -8,6 +8,8 @@ AI_DEPENDENCIES_MISSING_MESSAGE = (
     "RSS ingestion and baseline analysis remain available."
 )
 MODEL_UNAVAILABLE_MESSAGE = "The embedding model could not be loaded. Try again later."
+MODEL_LOADING_MESSAGE = "The embedding model is still loading. Try again shortly."
+MODEL_LOADING_RETRY_AFTER_SECONDS = 10
 PROCESSING_FAILED_MESSAGE = "AI processing failed."
 
 
@@ -17,6 +19,10 @@ class NotEnoughDocumentsError(ValueError):
 
 class EmbeddingModelUnavailableError(RuntimeError):
     pass
+
+
+class EmbeddingModelLoadingError(RuntimeError):
+    """The model is being loaded by the startup preload or another request right now."""
 
 
 def check_enough_documents(count: int) -> None:

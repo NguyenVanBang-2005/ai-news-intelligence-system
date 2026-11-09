@@ -26,6 +26,13 @@ def get_embedding_model() -> SentenceTransformer:
     return model_preload.embedding_model.get()
 
 
+def get_query_model() -> SentenceTransformer:
+    """The model for embedding a search request. Never waits for a load that another
+    caller is running (raises model_preload.ModelLoadingError instead)."""
+
+    return model_preload.embedding_model.get_without_waiting()
+
+
 def build_document(*, title: str, content: str) -> str:
     content = content.strip()[:MAX_EMBEDDED_CONTENT_CHARS]
 

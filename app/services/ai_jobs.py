@@ -15,6 +15,26 @@ from app.services.ai_errors import (
 
 logger = logging.getLogger(__name__)
 
+INTERRUPTED_BY_RESTART_MESSAGE = "Interrupted by application restart"
+
+
+def fail_interrupted_jobs(session_factory: sessionmaker[Session]) -> None:
+    """Mark jobs left pending or running by a previous run of the app as failed.
+
+    Jobs run inside the API process, so at startup none of them can still be alive. This
+    holds only with ONE worker process (the system's current assumption): with several
+    workers, a starting worker would fail jobs that another worker is still running.
+    Database errors (no connection, no ai_jobs table yet) are logged, never raised.
+    """
+    try:
+        with session_factory() as db:
+            count = AIJobRepository(db).fail_all_active(INTERRUPTED_BY_RESTART_MESSAGE)
+    except Exception:
+        logger.warning("Could not fail interrupted AI jobs at startup", exc_info=True)
+        return
+    if count:
+        logger.warning("Marked %d interrupted AI job(s) as failed", count)
+
 
 def run_ai_job(job_id: str, session_factory: sessionmaker[Session]) -> None:
     """Process the articles of one job and record the outcome on the job.

@@ -44,6 +44,25 @@ class SlidingWindowRateLimiter:
             hits.append(now)
             return None
 
+    def blocked_for(self, key: str, limit: int) -> int | None:
+        """Like hit() but records nothing: seconds until `key` may try again, or None."""
+
+        now = self.clock()
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return None
+            while hits and hits[0] <= now - self.window_seconds:
+                hits.popleft()
+            if len(hits) < limit:
+                return None
+            return max(1, math.ceil(hits[0] + self.window_seconds - now))
+
+    def forget(self, key: str) -> None:
+        """Drop every recorded request for `key` (e.g. after a successful login)."""
+        with self._lock:
+            self._hits.pop(key, None)
+
     def reset(self) -> None:
         with self._lock:
             self._hits.clear()

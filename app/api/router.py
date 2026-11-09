@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 
-from app.api.routes import ai, articles, ask, health, ingestion, sources, topics
+from app.api.routes import ai, articles, ask, auth, health, ingestion, sources, topics
 
 api_router = APIRouter()
 api_router.include_router(ai.router)
 api_router.include_router(ask.router)
+api_router.include_router(auth.router)
 api_router.include_router(health.router)
 api_router.include_router(sources.router)
 api_router.include_router(articles.router)

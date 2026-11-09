@@ -1,0 +1,133 @@
+Fresh stack: baked model, api healthcheck, pipeline, startup job cleanup (P-B + step 5b)
+======================================================================================
+
+Date:     2026-11-08 (UTC times below)
+Commit:   abd974a + uncommitted Dockerfile / compose.yaml (steps 1-2; not committed)
+Docker:   29.8.0
+Project:  ainis_fresh only. Every command:
+          docker compose -p ainis_fresh --env-file local-data/env.fresh \
+            -f compose.yaml -f local-data/compose.fresh.yaml ...
+Override: local-data/compose.fresh.yaml (git-ignored: ".gitignore:21:local-data/")
+          migrate.image = api.image = ai-news-intelligence:fresh
+          db.ports = 127.0.0.1:55434:5432   (55434 checked free; API 127.0.0.1:18200)
+
+Pre-checks
+----------
+Disk:            C: 231 GB free (>= 15 GB), no prune
+docker system df: images 21.41GB, build cache 30.67GB
+ADMIN_API_TOKEN in env.fresh: present (not regenerated, value not printed)
+
+Step 1 - Dockerfile
+-------------------
+ARG EMBEDDING_MODEL_NAME=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    (= Settings.embedding_model_name default, app/core/config.py:30)
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "...SentenceTransformer(sys.argv[1])" "$EMBEDDING_MODEL_NAME"
+    placed after `pip install`, before `COPY . .`
+compose.yaml x-app environment: HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+
+Step 2 - api healthcheck (compose.yaml)
+---------------------------------------
+python urllib GET http://127.0.0.1:8000/api/v1/health (image has no curl)
+interval 10s, timeout 5s, retries 6, start_period 30s
+
+Build (single build)
+--------------------
+11:49:43 -> 12:22:01 (~32 min), exit 0
+ai-news-intelligence:fresh  6059ecf815c7  11.1GB
+Image cache: /opt/hf-cache 458M, HF_HUB_OFFLINE=1 inside api
+Offline load: docker run --network none -e HF_HUB_OFFLINE=1 ... -> "offline load OK, dim 384"
+
+Image tags before / after (":local" unchanged):
+  before: ai-news-intelligence:local a9785e8b726e, :e2e f6dcab6e6a05
+  after:  ai-news-intelligence:local a9785e8b726e, :e2e f6dcab6e6a05, :fresh 6059ecf815c7
+ainis_main-api-1 image sha256:a9785e8b726e..., StartedAt 2026-11-03T01:35:45Z (not restarted)
+
+Stack up
+--------
+db healthy, migrate Exited (0), api "Up (healthy)" ~9 s after start
+GET /api/v1/health -> {"status":"ok","model_ready":false}  (AI_PRELOAD_MODEL=false)
+
+Ingestion (one source at a time, POST /ingestion/run?source_id=N)
+----------------------------------------------------------------
+1 MIT Research    https://news.mit.edu/rss/research                                  seen 50 created 50 errors []
+2 BBC Technology  https://feeds.bbci.co.uk/news/technology/rss.xml                   seen 21 created 21 errors []
+3 TechCrunch AI   https://techcrunch.com/category/artificial-intelligence/feed/      seen 20 created 20 errors []
+4 The Verge AI    https://www.theverge.com/rss/ai-artificial-intelligence/index.xml  seen 10 created 10 errors []
+Total 101 articles, all sources last_status ok
+
+AI pipeline
+-----------
+POST /ai/process {} -> 202, job caaa6508-b4fe-4ad2-9428-8440845f99e9
+succeeded in 23.5 s: documents_received 101, unique 101, semantic_duplicates 0,
+topics_created 7, articles_updated 101, confidence_method hdbscan_soft, topic_coherence -0.1045
+topics table: 7 rows (> 0, continue)
+
+Smoke test
+----------
+GET /api/v1/health 200 | /docs 200 | / 200 | /api/v1/articles 200 | /api/v1/sources 200
+GET /api/v1/ai/topics 200 (7) | /api/v1/topics/trending 200 | /api/v1/topics/timeseries 200
+POST /api/v1/ai/search {"input":"artificial intelligence regulation"} 200, 5 sources
+POST /api/v1/ai/search {"input":"qwzx plorb"}                         200, 0 sources
+/ai/ask: NOT TESTED, needs an LLM (LLM_BASE_URL unchanged).
+
+Step 5b - startup cleanup of interrupted jobs
+--------------------------------------------
+Fake job (columns from app/models/ai_job.py; created_at set by hand, its default is Python-side;
+find_active() filters on created_at):
+  INSERT INTO ai_jobs (id,status,active_key,parameters,created_at,started_at)
+  VALUES (gen_random_uuid()::text,'running','ai_process','{}'::json,now(),now());
+  -> id 4838c0ca-41e8-4265-abc0-716a55fe412f (36 chars), created_at = started_at = 12:24:53Z
+
+Before restart:
+  POST /ai/process {}             -> 409 "BERTopic requires at least 10 documents. Current batch contains 0."
+     (the document check runs BEFORE the lock check, app/api/routes/ai.py; all 101
+      articles were already processed, so this 409 does NOT test the lock)
+  POST /ai/process {"force":true} -> 409 "AI job 4838c0ca-41e8-4265-abc0-716a55fe412f is still running."
+     (lock confirmed; no job created)
+
+Restart (12:25:01Z):
+  docker compose -p ainis_fresh --env-file local-data/env.fresh -f compose.yaml \
+    -f local-data/compose.fresh.yaml restart api
+  api healthy ~8 s later (StartedAt 12:25:04Z)
+  api log: "Marked 1 interrupted AI job(s) as failed" then "Application startup complete."
+
+Fake job after restart:
+  status      failed                               PASS
+  error       Interrupted by application restart   PASS
+  finished_at 2026-11-08 12:25:07.049213+00        PASS
+  active_key  NULL                                 PASS
+
+After restart:
+  POST /ai/process {}             -> 409 "BERTopic requires at least 10 documents. Current batch contains 0."
+     -> case: 409 because not enough unprocessed documents (not the lock)
+  POST /ai/process {"force":true} -> 202, job 658d6dc0-7a38-4431-8af2-de8e1a785572
+     -> lock freed by the restart; job succeeded in 20.7 s (101 docs, 7 topics, coherence -0.1045)
+     (note: this re-processed the 101 articles on the temp stack)
+
+Final ai_jobs:
+  caaa6508-... succeeded  active_key NULL
+  4838c0ca-... failed     active_key NULL  "Interrupted by application restart"
+  658d6dc0-... succeeded  active_key NULL
+
+State after vs before
+---------------------
+docker image ls: + ai-news-intelligence:fresh 6059ecf815c7; :local/:e2e unchanged
+docker ps:       + ainis_fresh-api-1 (healthy, 127.0.0.1:18200), + ainis_fresh-db-1 (healthy, 127.0.0.1:55434);
+                 ainis_main / ainis_e2e / ainis_dockertest unchanged
+docker volume ls: + ainis_fresh_postgres_data; nothing removed
+git status:      + M Dockerfile, + M compose.yaml (this task)
+                 + M app/services/topic_timeseries.py - NOT this task: stray text "njmmm" on line 76,
+                   mtime 2026-11-08 19:22 +0700 (= 12:22Z, after the build copied the code);
+                   the file in the image does not contain it and compiles; the working copy has a SyntaxError.
+No commit made. ainis_fresh stack left running (not torn down).
+
+Result
+------
+PASS  model baked into image, loads with --network none + HF_HUB_OFFLINE=1
+PASS  api healthcheck reports healthy
+PASS  :local image and ainis_main untouched
+PASS  4 sources ingested, pipeline succeeded, 7 topics
+PASS  active fake job blocks /ai/process (409 with force=true)
+PASS  restart marks it failed / "Interrupted by application restart" / finished_at set / active_key NULL
+PASS  /ai/process accepted again after restart (202 with force=true; 409 with {} = not enough new documents)

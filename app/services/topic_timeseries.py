@@ -73,7 +73,7 @@ class TopicTimeseriesService:
                 topic=item.topic,
                 trend_score=item.trend_score,
                 article_count=item.recent_count,
-                points=[DailyCount(day, counts[(item.topic, day)]) for day in day_list],
+                points=[DailyCount(day, counts[(item.topic, day)]) for day in day_list], 
             )
             for item in topics
         ]
