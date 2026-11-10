@@ -30,6 +30,17 @@ export async function logOut() {
   await request(`${AUTH_PATH}/logout`, { method: "POST" });
 }
 
+/**
+ * Replaces the password of the signed-in user (204). The server keeps this session and
+ * ends the user's other sessions.
+ */
+export async function changePassword(currentPassword, newPassword) {
+  await request(`${AUTH_PATH}/change-password`, {
+    method: "POST",
+    body: { current_password: currentPassword, new_password: newPassword },
+  });
+}
+
 /** The message to show for a failed login or registration: the server's detail if any. */
 export function authErrorText(error) {
   const detail = detailText(error);

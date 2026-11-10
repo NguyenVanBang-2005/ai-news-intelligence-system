@@ -21,6 +21,7 @@ from app.services.passwords import hash_password, verify_dummy, verify_password
 __all__ = [
     "UsernameTakenError",
     "authenticate",
+    "change_password",
     "create_or_promote_admin",
     "create_session",
     "hash_token",
@@ -79,6 +80,16 @@ def resolve_session(db: Session, token: str) -> User | None:
     if user is None or not user.is_active:
         return None
     return user
+
+
+def change_password(db: Session, user: User, new_password: str, current_token: str) -> None:
+    """Store a new scrypt hash and end every other session of the user.
+
+    The caller has already checked the current password and the new one's rules; the
+    session behind `current_token` stays valid.
+    """
+    UserRepository(db).set_password_hash(user, hash_password(new_password))
+    UserSessionRepository(db).delete_for_user_except(user.id, hash_token(current_token))
 
 
 def revoke_session(db: Session, token: str) -> None:

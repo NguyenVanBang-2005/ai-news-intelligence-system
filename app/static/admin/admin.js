@@ -5,6 +5,7 @@
 import { authErrorText, fetchCurrentUser, logOut } from "../js/auth.js";
 import { badge, errorBanner, loading } from "../js/components.js";
 import { el } from "../js/dom.js";
+import { changePasswordControls } from "../js/password-dialog.js";
 import { aiProcessPanel } from "./ai-process-admin.js";
 import { onSessionLost } from "./admin-api.js";
 import { ingestionPanel } from "./ingestion-admin.js";
@@ -76,6 +77,7 @@ function showAccount(user) {
   account.replaceChildren(
     el("span", { className: "account-name", text: user.username }),
     badge(user.role, "primary"),
+    ...changePasswordControls(),
     logOutButton,
     message,
   );

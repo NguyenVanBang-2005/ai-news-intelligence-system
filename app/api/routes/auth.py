@@ -9,18 +9,30 @@ from app.api.auth_deps import (
 )
 from app.api.deps import DbSession
 from app.core.config import settings
-from app.schemas.auth import LoginRequest, RegisterRequest, UserRead, normalize_username
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    UserRead,
+    normalize_username,
+    validate_password,
+)
 from app.services.auth import (
     UsernameTakenError,
     authenticate,
+    change_password,
     create_session,
     register_user,
     revoke_session,
 )
+from app.services.passwords import verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 INVALID_CREDENTIALS = "Invalid username or password"
+WRONG_CURRENT_PASSWORD = "Current password is incorrect"
+# Plain number: Starlette renamed the HTTP_422 constant and warns about the old name.
+UNPROCESSABLE = 422
 
 
 @router.post(
@@ -79,6 +91,46 @@ def logout(request: Request, db: DbSession) -> Response:
         samesite="strict",
     )
     return response
+
+
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_csrf_safe_request)],
+)
+def change_password_route(
+    payload: ChangePasswordRequest, request: Request, user: CurrentUser, db: DbSession
+) -> Response:
+    """Replace the signed-in user's password and end their other sessions.
+
+    Session cookie only: X-Admin-Token is not a user, so without a cookie the answer is 401.
+    Wrong current passwords count in the login failure limiter (per account) -> 429.
+    """
+    failure_key = f"change-password|user:{user.id}"
+    limit = settings.auth_login_max_failures
+    retry_after = login_failure_limiter.blocked_for(failure_key, limit)
+    if retry_after is not None:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    if not verify_password(payload.current_password, user.password_hash):
+        login_failure_limiter.hit(failure_key, limit)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=WRONG_CURRENT_PASSWORD)
+    login_failure_limiter.forget(failure_key)
+    if payload.new_password == payload.current_password:
+        raise HTTPException(
+            UNPROCESSABLE,
+            detail="New password must be different from the current password",
+        )
+    try:
+        validate_password(payload.new_password, user.username)
+    except ValueError as exc:
+        raise HTTPException(UNPROCESSABLE, detail=f"New {exc}") from exc
+    token = request.cookies[settings.session_cookie_name]
+    change_password(db, user, payload.new_password, token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserRead)

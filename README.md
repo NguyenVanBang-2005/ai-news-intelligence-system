@@ -157,9 +157,9 @@ Web UI (same origin as the API, no build step):
   latest classified articles.
 - **API** (`/docs`): Swagger UI.
 - **Log in / Register** (top right): a dialog; once signed in the bar shows the username, the
-  role and "Log out", plus an **Admin** link for admins. There is no admin token input anywhere.
+  role, "Change password" and "Log out", plus an **Admin** link for admins. There is no admin token input anywhere.
 - **Admin** (`/admin/`, admin role only): source list with sync status, add an RSS/Atom source,
-  delete a source (after a confirmation), run ingestion for all sources or one source, and
+  turn a source on or off (Enable / Disable), delete a source (after a confirmation), run ingestion for all sources or one source, and
   start AI processing and follow the job until it finishes. Signed out, it says "Log in as an
   administrator"; a `user` account sees "Administrator role required".
 
@@ -168,6 +168,7 @@ All API paths are under `/api/v1`.
 | Access | Endpoints |
 |---|---|
 | Public | `GET /health`, `GET /sources`, `GET /articles`, `GET /articles/{id}`, `GET /topics/trending`, `GET /topics/timeseries`, `GET /ai/topics`, `POST /ai/search` (rate limited) |
+| Signed-in session (cookie; `X-Admin-Token` does not count) | `GET /auth/me`, `POST /auth/change-password` |
 | Admin (`X-Admin-Token` or an admin session) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
 
 Without a signed-in session, admin endpoints answer **401** when the token is missing or
@@ -177,7 +178,8 @@ UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
 
 ## Accounts and roles
 
-- Endpoints: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+- Endpoints: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`,
+  `POST /auth/change-password`.
   Login sets an HttpOnly, `SameSite=Strict` session cookie (12 hours, `SESSION_TTL_HOURS`);
   the database keeps only a SHA-256 of the session token. Passwords are hashed with scrypt.
 - Two roles: `user` and `admin`. Registration always creates a `user`; no API endpoint
@@ -192,6 +194,11 @@ UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
   docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>  # Docker
   ```
 
+- `POST /auth/change-password` (session cookie, `X-Requested-With: ainis`) takes
+  `{current_password, new_password}`; the new password follows the registration rules and must
+  differ from the current one (422). A wrong current password is 400; after
+  `AUTH_LOGIN_MAX_FAILURES` wrong tries per account it is 429. On success (204) the password is
+  re-hashed and every other session of the account ends; the current one stays signed in.
 - `X-Admin-Token` still works as a service key for scripts. When the header is present only
   the token is checked (cookies are ignored).
 - With a session cookie, admin `POST`/`PATCH`/`DELETE` requests must send
@@ -243,14 +250,15 @@ PostgreSQL tests.
 - Registering a username that exists answers 409, so anyone can find out which usernames exist.
 - With `SESSION_COOKIE_SECURE=false` (the default, for plain HTTP) the session cookie is also
   sent over unencrypted HTTP.
-- No password recovery, and no account management through the API (listing, disabling or
-  changing the role of accounts); only `scripts/create_admin.py` creates or promotes admins.
+- No password recovery by email: a forgotten password can only be reset by an operator with
+  `scripts/create_admin.py --reset-password` (which also makes the account an admin).
+- No account management through the API (listing, disabling or changing the role of
+  accounts); only `scripts/create_admin.py` creates or promotes admins.
 - Two "Rescan sources" runs at the same time are not locked against each other.
 - AI jobs run inside the API process; a restart loses a running job. At startup, jobs left
   pending or running are marked failed ("Interrupted by application restart"), so a new
   `POST /ai/process` can start at once instead of waiting out the 1-hour job timeout.
   This assumes a single worker process.
-- The admin page cannot turn a source on or off; `PATCH /sources/{id}` is API only.
 - `/docs` needs Internet (Swagger UI is loaded from a CDN); the main UI does not.
 - No automatic backups.
 - The PNG logo looks blurry on 2x screens.

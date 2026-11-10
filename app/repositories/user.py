@@ -40,6 +40,10 @@ class UserRepository:
             user.password_hash = password_hash
         self.db.commit()
 
+    def set_password_hash(self, user: User, password_hash: str) -> None:
+        user.password_hash = password_hash
+        self.db.commit()
+
     def set_last_login(self, user: User, when: datetime) -> None:
         user.last_login_at = when
         self.db.commit()

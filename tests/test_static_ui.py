@@ -239,3 +239,46 @@ def test_scripts_set_no_inline_style(path) -> None:
 
     assert not re.search(r"""setAttribute\(\s*["']style""", source)
     assert "cssText" not in source and "style:" not in source
+
+
+# --- change password dialog and source on/off -----------------------------------------------
+
+
+def test_change_password_dialog_is_in_both_account_bars() -> None:
+    dialog = read(STATIC_DIR / "js" / "password-dialog.js")
+    auth = read(STATIC_DIR / "js" / "auth.js")
+
+    assert 'text: "Change password"' in dialog
+    assert 'role: "dialog", "aria-modal": "true"' in dialog
+    for label in ("Current password", "New password", "Confirm new password"):
+        assert f'"{label}"' in dialog
+    assert '"current-password"' in dialog and '"new-password"' in dialog
+    assert 'if (next !== confirm) return "The new passwords do not match.";' in dialog
+    assert "`${AUTH_PATH}/change-password`" in auth
+    assert "current_password: currentPassword, new_password: newPassword" in auth
+    for path in (STATIC_DIR / "js" / "account-bar.js", ADMIN_DIR / "admin.js"):
+        assert "...changePasswordControls()," in read(path), name(path)
+
+
+def test_change_password_errors_and_notice_are_plain_text() -> None:
+    dialog = read(STATIC_DIR / "js" / "password-dialog.js")
+
+    assert 'if (error?.status === 401) return "Your session has ended.' in dialog
+    assert "return authErrorText(error);" in dialog  # 400 / 422 / 429 detail via detailText
+    assert 'el("p", { className: "banner banner-error", role: "alert", text })' in dialog
+    assert 'notice.textContent = "Password changed.' in dialog
+    for class_name in ("account-notice", "auth-form", "form-note", "form-message"):
+        assert f".{class_name}" in STYLE
+
+
+def test_admin_sources_have_an_enable_disable_button() -> None:
+    sources = read(ADMIN_DIR / "sources-admin.js")
+
+    assert 'const action = source.is_active ? "Disable" : "Enable";' in sources
+    assert 'method: "PATCH", body: { is_active: turnOn }' in sources
+    assert "adminRequest(`${SOURCES_PATH}/${encodeURIComponent(source.id)}`" in sources
+    assert 'button.setAttribute("aria-busy", "true");' in sources
+    assert "button.disabled = true;" in sources
+    assert 'turnOn ? "Enabling…" : "Disabling…"' in sources
+    assert "row.replaceWith(fresh);" in sources
+    assert ".btn-toggle" in STYLE
