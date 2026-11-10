@@ -170,3 +170,72 @@ def test_ai_job_is_polled_until_finished() -> None:
     assert 'const FINISHED = new Set(["succeeded", "failed"]);' in ai
     assert 'adminRequest(PROCESS_PATH, { method: "POST", body: {} })' in ai
     assert "while (!FINISHED.has(job.status))" in ai
+
+
+# --- layout of the admin result blocks (CSS read as text) ----------------------------------
+
+STYLE = read(STATIC_DIR / "style.css")
+
+
+def css_rule(selector: str) -> str:
+    """The body of the first top-level rule whose selector is exactly `selector`."""
+    match = re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", STYLE)
+    assert match, f"no rule for {selector}"
+    return match.group(1)
+
+
+def static_classes(path) -> set[str]:
+    """Class names written as plain strings in `className: "..."` (template parts skipped)."""
+    names = set()
+    for value in re.findall(r'className:\s*"([^"]+)"', read(path)):
+        names.update(value.split())
+    return names
+
+
+RESULT_BLOCKS = [ADMIN_DIR / "ingestion-admin.js", ADMIN_DIR / "ai-process-admin.js"]
+
+
+@pytest.mark.parametrize("path", RESULT_BLOCKS, ids=name)
+def test_result_block_classes_exist_in_the_stylesheet(path) -> None:
+    for class_name in static_classes(path):
+        assert re.search(rf"\.{re.escape(class_name)}\b", STYLE), f"{name(path)}: .{class_name}"
+
+
+def test_new_layout_classes_exist() -> None:
+    for class_name in ("rescan-errors-title-danger", "admin-card", "job-result", "job-status"):
+        assert f".{class_name}" in STYLE
+
+
+def test_stat_grid_wraps_and_stays_in_normal_flow() -> None:
+    grid = css_rule(".stat-grid")
+
+    assert "repeat(auto-fit, minmax(min(100%, 150px), 1fr))" in grid
+    assert "margin" not in grid  # a negative margin pulled the cards over the button above
+    for selector in (".stat-grid", ".stat-card", ".rescan-card"):
+        body = css_rule(selector)
+        assert "position" not in body and "float" not in body and "height" not in body
+
+
+def test_long_technical_names_wrap_instead_of_being_cut() -> None:
+    for selector in (".stat-field", ".stat-label", ".rescan-summary"):
+        assert "overflow-wrap: anywhere" in css_rule(selector)
+    assert "min-width: 0" in css_rule(".stat-card")
+    assert "overflow-x: auto" in css_rule(".source-list-body")
+
+
+def test_errors_title_is_red_only_with_errors() -> None:
+    ingestion = read(ADMIN_DIR / "ingestion-admin.js")
+
+    assert "color: var(--color-text-muted)" in css_rule(".rescan-errors-title")
+    assert "color: var(--color-danger)" in css_rule(".rescan-errors-title-danger")
+    assert ('return count > 0 ? "rescan-errors-title rescan-errors-title-danger" '
+            ': "rescan-errors-title";') in ingestion
+    assert "className: errorsTitleClass(errors.length)" in ingestion
+
+
+@pytest.mark.parametrize("path", ALL_JS, ids=name)
+def test_scripts_set_no_inline_style(path) -> None:
+    source = read(path)
+
+    assert not re.search(r"""setAttribute\(\s*["']style""", source)
+    assert "cssText" not in source and "style:" not in source

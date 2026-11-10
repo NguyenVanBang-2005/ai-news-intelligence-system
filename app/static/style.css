@@ -720,7 +720,7 @@ body.dialog-open { overflow: hidden; }
 
 
 /* Hero: text on the left, Rescan button on the right */
-.hero-sources { text-align: left; padding-bottom: calc(var(--space-12) + var(--space-12)); }
+.hero-sources { text-align: left; }
 
 .hero-sources-inner {
   display: flex;
@@ -781,19 +781,19 @@ body.dialog-open { overflow: hidden; }
   .spinner { animation-duration: 2.4s; }
 }
 
-/* Stat cards overlap the bottom of the hero */
 .sources-page { display: flex; flex-direction: column; gap: var(--space-6); }
 
+/* Count cards (ingestion results). In normal flow, never pulled over what is above them;
+   as many columns as fit, each at least 150px (or the whole width if that is narrower). */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: var(--space-4);
-  margin-top: calc(-1 * (var(--space-12) + var(--space-8)));
 }
 
-.stat-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-6); }
+.stat-card { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-4); }
 .stat-top, .stat-bottom { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-2); }
-.stat-label { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text-muted); }
+.stat-label { margin: 0; font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text-muted); overflow-wrap: anywhere; }
 
 .stat-index {
   padding: 2px var(--space-2);
@@ -806,14 +806,15 @@ body.dialog-open { overflow: hidden; }
 
 .stat-value { margin: 0; font-size: 32px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .stat-bottom { flex-wrap: wrap; align-items: baseline; }
-.stat-field { font-size: 11px; color: var(--color-text-muted); }
+.stat-field { font-size: 11px; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .stat-meta { font-size: var(--font-size-xs); font-weight: 600; color: var(--color-text-muted); text-align: right; }
 
 .rescan-report:empty { display: none; }
 .rescan-card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-6); }
-.rescan-summary { margin: 0; font-size: var(--font-size-sm); }
+.rescan-summary { margin: 0; font-size: var(--font-size-sm); overflow-wrap: anywhere; }
 .rescan-summary time { font-weight: 600; }
-.rescan-errors-title { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--color-danger); }
+.rescan-errors-title { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.rescan-errors-title-danger { color: var(--color-danger); }
 .rescan-errors ul { margin: 0; padding-left: var(--space-6); font-size: var(--font-size-sm); }
 .rescan-errors li { overflow-wrap: anywhere; }
 .rescan-more { color: var(--color-text-muted); list-style: none; }
@@ -860,6 +861,8 @@ body.dialog-open { overflow: hidden; }
 
 /* Source table (cards below 700px) */
 .source-list-card { padding-left: 0; padding-right: 0; padding-bottom: 0; overflow: hidden; }
+/* A table wider than the card scrolls sideways instead of being cut off by overflow: hidden. */
+.source-list-body { overflow-x: auto; }
 .source-list-card > :not(.source-list-body) { margin-left: var(--space-6); margin-right: var(--space-6); }
 .source-list-body > .state, .source-list-body > .banner, .source-list-body > .state-empty { margin: 0 var(--space-6) var(--space-6); }
 
@@ -1004,10 +1007,6 @@ body.dialog-open { overflow: hidden; }
 
 /* ===== Sources page: smaller screens ===== */
 
-@media (max-width: 900px) {
-  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 720px) {
   .hero-actions { align-items: stretch; width: 100%; }
   .source-list-card > :not(.source-list-body) { margin-left: var(--space-4); margin-right: var(--space-4); }
@@ -1038,7 +1037,8 @@ body.dialog-open { overflow: hidden; }
 }
 
 @media (max-width: 480px) {
-  .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .stat-card { padding: var(--space-3); }
+  .stat-value { font-size: 24px; }
   .source-table .btn-delete, .pill, .dialog-actions .btn { width: auto; }
 }
 
@@ -1182,7 +1182,8 @@ body.dialog-open { overflow: hidden; }
 .admin-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
 .admin-card { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 .admin-card .panel-title, .admin-card .panel-subtitle { margin: 0; }
-.admin-card .rescan-report, .admin-card .job-status { align-self: stretch; }
+.admin-card .rescan-report, .admin-card .job-status { align-self: stretch; min-width: 0; }
+.rescan-report .banner, .job-status .banner { overflow-wrap: anywhere; }
 .admin-gate { max-width: 560px; margin: var(--space-8) auto; text-align: center; }
 .admin-gate-title { margin: 0 0 var(--space-3); font-size: var(--font-size-lg); }
 .admin-gate .btn { display: inline-block; text-decoration: none; }

@@ -72,10 +72,15 @@ function resultCard(target, result) {
       el("code", { className: "stat-field", text: count.key }),
     ]))),
     el("div", { className: "rescan-errors" }, [
-      el("h3", { className: "rescan-errors-title", text: `Errors (${errors.length})` }),
+      el("h3", { className: errorsTitleClass(errors.length), text: `Errors (${errors.length})` }),
       errors.length
         ? el("ul", {}, errors.map((text) => el("li", { text: String(text) })))
         : el("p", { className: "state", text: "No errors." }),
     ]),
   ]);
+}
+
+// Red only when there is at least one error; "Errors (0)" stays neutral.
+export function errorsTitleClass(count) {
+  return count > 0 ? "rescan-errors-title rescan-errors-title-danger" : "rescan-errors-title";
 }
