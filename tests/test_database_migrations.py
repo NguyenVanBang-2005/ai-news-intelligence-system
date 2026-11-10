@@ -167,3 +167,19 @@ def test_compose_allows_isolated_env_file_and_backup_dir() -> None:
 
     assert "env_file: ${APP_ENV_FILE:-.env}" in text
     assert "${BACKUP_DIR:-./backups}:/backups" in text
+
+
+def test_compose_api_has_its_own_session_cookie_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker and a host run on one machine must not overwrite each other's session cookie."""
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "compose.yaml").read_text(encoding="utf-8")
+    shared_block, services = text.split("\nservices:", 1)
+
+    # In the block every app service merges (<<: *app), not in a service's own environment,
+    # which would replace the POSTGRES_* variables instead of adding to them.
+    assert "    SESSION_COOKIE_NAME: ainis_session_docker\n" in shared_block
+    assert "SESSION_COOKIE_NAME" not in services
+    monkeypatch.setenv("SESSION_COOKIE_NAME", "ainis_session_docker")
+    assert Settings(_env_file=None).session_cookie_name == "ainis_session_docker"
+    assert Settings.model_fields["session_cookie_name"].default == "ainis_session"

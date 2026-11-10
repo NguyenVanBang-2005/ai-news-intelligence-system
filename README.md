@@ -94,12 +94,14 @@ Notes:
 - The first start takes about 30 seconds to import the ML libraries and load the model.
   `AI_PRELOAD_MODEL=true` does this in the background at startup, so the first search does
   not wait; without it the first search waits instead.
-- Admin endpoints answer 503 until `ADMIN_API_TOKEN` is set (see Configuration).
+- The admin page uses an admin session (create one with `scripts/create_admin.py`, see
+  [Accounts and roles](#accounts-and-roles)). `ADMIN_API_TOKEN` is optional: it is only
+  needed to call admin endpoints from scripts or curl (`X-Admin-Token`).
 
 ## Quick start B: Docker Compose (PostgreSQL 17 + migrations + API)
 
 ```bash
-cp .env.example .env      # then set POSTGRES_PASSWORD and ADMIN_API_TOKEN
+cp .env.example .env      # then set POSTGRES_PASSWORD (ADMIN_API_TOKEN only for scripts/curl)
 docker compose up -d --build
 ```
 
@@ -114,6 +116,10 @@ docker compose up -d --build
 - Create the first admin account (see [Accounts and roles](#accounts-and-roles)):
   `docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>`
   (the container name depends on your Compose project name; see `docker compose ps`).
+- The Compose API uses the session cookie `ainis_session_docker` (`SESSION_COOKIE_NAME` in
+  `compose.yaml`), the host run `ainis_session`: browsers share cookies across the ports
+  of one host, so with two names a Docker and a host server can run side by side without
+  overwriting each other's sign-in.
 - A fresh stack has an **empty database**: no articles and no topics until you add sources,
   run ingestion (`POST /api/v1/ingestion/run`) and then `POST /api/v1/ai/process`.
 - Database setup, backup and restore: [docs/database.md](docs/database.md).
@@ -132,7 +138,7 @@ Never commit `.env`.
 | `DATABASE_URL` | PostgreSQL on `127.0.0.1:5432` | Host runs only; inside Compose the URL is built from `POSTGRES_*` |
 | `POSTGRES_PASSWORD` | placeholder `news` | Compose database password; the placeholder is for local development only, change it. If you change it and also run on the host with `DATABASE_URL`, change the password in `DATABASE_URL` too |
 | `API_PORT` | `8001` | Host port of the Compose API |
-| `ADMIN_API_TOKEN` | empty | Token for admin endpoints; empty means they answer 503. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `ADMIN_API_TOKEN` | empty | Optional service key for admin endpoints from scripts/curl (`X-Admin-Token`); the UI uses an admin session instead. Empty: a request that sends the header gets 503. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `EMBEDDING_MODEL_NAME` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Embedding model (same as the code default); the snapshot and the search thresholds were made with it |
 | `AI_PRELOAD_MODEL` | `true` | Load the model in the background at startup (code default `false`) |
 | `AI_SEARCH_MIN_SIMILARITY` | `0.5` | Public search: an article below this is shown only if it contains at least half of the query's distinct words (common words ignored); tuned with the model above |
@@ -141,6 +147,7 @@ Never commit `.env`.
 | `INGESTION_FULL_TEXT` | `false` | Download the article page when the feed gives only a short snippet (code default `true`) |
 | `AI_SEARCH_RATE_PER_MINUTE` | `30` | Public search requests per client IP per minute, counted per process; over it: 429 with `Retry-After` |
 | `AI_SEARCH_USER_RATE_PER_MINUTE` | `120` | Same, for signed-in users (user or admin), counted per account instead of per IP |
+| `LOGIN_IP_MAX_ATTEMPTS`, `LOGIN_IP_WINDOW_SECONDS` | `20`, `60` | Login attempts (right or wrong, any username) per client address per window, counted per process before the password is checked; over it: 429 with `Retry-After` |
 | `SESSION_COOKIE_SECURE` | `false` | Send the session cookie over HTTPS only; set `true` when served over HTTPS |
 | `AI_SEARCH_MAX_BODY_BYTES` | `4096` | Largest accepted search request body |
 
@@ -171,8 +178,9 @@ All API paths are under `/api/v1`.
 | Signed-in session (cookie; `X-Admin-Token` does not count) | `GET /auth/me`, `POST /auth/change-password` |
 | Admin (`X-Admin-Token` or an admin session) | `POST /sources`, `PATCH /sources/{id}`, `DELETE /sources/{id}`, `POST /ingestion/run`, `POST /ai/process`, `GET /ai/process/{job_id}`, `POST /ai/ask` |
 
-Without a signed-in session, admin endpoints answer **401** when the token is missing or
-wrong, and **503** when the server has no `ADMIN_API_TOKEN`. Deleting a source also deletes
+Without a signed-in session (none, expired or ended), admin endpoints answer **401**
+"Not signed in.". A request that sends `X-Admin-Token` gets **401** when the token is
+wrong and **503** when the server has no `ADMIN_API_TOKEN`. Deleting a source also deletes
 its articles.
 UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
 
@@ -185,12 +193,20 @@ UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
 - Two roles: `user` and `admin`. Registration always creates a `user`; no API endpoint
   changes a role. An `admin` session can call the admin endpoints above; a `user` session
   gets 403 there.
-- Create the first admin (or promote an existing account) with the script; it asks for the
-  password twice without showing it (or reads `AINIS_NEW_ADMIN_PASSWORD`). An existing
-  account keeps its password unless you add `--reset-password`.
+- Create the first admin with the script; it asks for the password twice without showing it
+  (or reads `AINIS_NEW_ADMIN_PASSWORD`). It first prints the database it writes to
+  (`Database: ...`, password masked): check it is the one your server uses (`DATABASE_URL`).
+  For an account that already exists:
+  - `--reset-password` sets a new password and ends all its sessions; the role and the
+    active flag stay as they are (a `user` stays a `user`).
+  - `--promote` makes it an active `admin`; the password stays unless you add
+    `--reset-password` too.
+  - Without either flag the script stops with an error and changes nothing.
 
   ```bash
   python scripts/create_admin.py --username <name>                               # host
+  python scripts/create_admin.py --username <name> --reset-password              # forgotten password
+  python scripts/create_admin.py --username <name> --promote                     # existing account -> admin
   docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>  # Docker
   ```
 
@@ -251,7 +267,7 @@ PostgreSQL tests.
 - With `SESSION_COOKIE_SECURE=false` (the default, for plain HTTP) the session cookie is also
   sent over unencrypted HTTP.
 - No password recovery by email: a forgotten password can only be reset by an operator with
-  `scripts/create_admin.py --reset-password` (which also makes the account an admin).
+  `scripts/create_admin.py --reset-password` (keeps the account's role, ends its sessions).
 - No account management through the API (listing, disabling or changing the role of
   accounts); only `scripts/create_admin.py` creates or promotes admins.
 - Two "Rescan sources" runs at the same time are not locked against each other.

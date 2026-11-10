@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Per username + client address, in memory per process (like the search limiter).
     auth_login_max_failures: int = Field(default=5, ge=1)
     auth_login_window_seconds: int = Field(default=900, ge=1)
+    # Every login attempt (right or wrong, any username) per client address, counted before
+    # the password is hashed, so a flood of attempts cannot keep scrypt busy (per process).
+    login_ip_max_attempts: int = Field(default=20, ge=1)
+    login_ip_window_seconds: int = Field(default=60, ge=1)
     # Registrations per client address per hour (per process).
     auth_register_per_hour: int = Field(default=5, ge=1)
 

@@ -19,6 +19,7 @@ from app.services.rate_limit import SlidingWindowRateLimiter
 __all__ = [
     "CurrentUser",
     "get_current_user",
+    "limit_login_attempts",
     "limit_register_rate",
     "login_failure_key",
     "require_csrf_safe_request",
@@ -28,6 +29,7 @@ __all__ = [
 # In memory, per process (see app/services/rate_limit.py): exact with one worker only.
 # The window is read from settings when the limiter is created, i.e. at import time.
 login_failure_limiter = SlidingWindowRateLimiter(window_seconds=settings.auth_login_window_seconds)
+login_ip_limiter = SlidingWindowRateLimiter(window_seconds=settings.login_ip_window_seconds)
 register_rate_limiter = SlidingWindowRateLimiter(window_seconds=3600)
 
 
@@ -58,6 +60,21 @@ def limit_register_rate(request: Request) -> None:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many registrations. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def limit_login_attempts(request: Request) -> None:
+    """At most LOGIN_IP_MAX_ATTEMPTS logins per client address per LOGIN_IP_WINDOW_SECONDS.
+
+    Every attempt counts, also a successful one (never forgotten), and the check runs
+    before the password is hashed: a refused attempt costs no scrypt.
+    """
+    retry_after = login_ip_limiter.hit(rate_limit_key(request), settings.login_ip_max_attempts)
+    if retry_after is not None:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
             headers={"Retry-After": str(retry_after)},
         )
 

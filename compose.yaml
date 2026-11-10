@@ -13,6 +13,10 @@ x-app: &app
     TZ: UTC
     # The embedding model is baked into the image (Dockerfile); never download at runtime.
     HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+    # Own cookie name: browsers share cookies across ports of one host, so the API on the
+    # host (ainis_session) and this one would otherwise overwrite each other's sign-in.
+    # Set here (the shared block) because an api-only `environment:` would replace it all.
+    SESSION_COOKIE_NAME: ainis_session_docker
 
 services:
   db:

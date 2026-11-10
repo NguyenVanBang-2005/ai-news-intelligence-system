@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,13 +12,17 @@ from app.api.router import api_router
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.security_headers import SecurityHeadersMiddleware
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_factory_database_label
 from app.services import model_preload
 from app.services.ai_jobs import fail_interrupted_jobs
 
 STATIC_DIR = Path(__file__).parent / "static"
 SEARCH_PAGE = STATIC_DIR / "index.html"
 ADMIN_PAGE = STATIC_DIR / "admin" / "index.html"
+
+# uvicorn configures its own loggers only; "uvicorn.error" is the one that prints INFO
+# lines (an app logger would need its own handler for INFO to appear).
+startup_logger = logging.getLogger("uvicorn.error")
 
 
 def startup_session_factory(fastapi_app: FastAPI) -> sessionmaker[Session]:
@@ -29,8 +34,11 @@ def startup_session_factory(fastapi_app: FastAPI) -> sessionmaker[Session]:
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     """Before serving, fail AI jobs a previous run left unfinished; with AI_PRELOAD_MODEL,
-    start loading the search model without delaying startup."""
-    fail_interrupted_jobs(startup_session_factory(fastapi_app))
+    start loading the search model without delaying startup. Logs the database in use
+    (password masked), so a missing DATABASE_URL is noticed at once."""
+    session_factory = startup_session_factory(fastapi_app)
+    startup_logger.info("Database: %s", session_factory_database_label(session_factory))
+    fail_interrupted_jobs(session_factory)
     if settings.ai_preload_model:
         model_preload.embedding_model.start_background_load()
     yield

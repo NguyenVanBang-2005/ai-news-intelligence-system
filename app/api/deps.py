@@ -90,21 +90,23 @@ def require_admin(
 ) -> None:
     """Guard for write and costly endpoints, decided in this order:
 
-    a. X-Admin-Token header present (even empty): only the token counts (503 if unset,
-       401 if wrong); cookies are ignored and no CSRF check is made.
+    a. X-Admin-Token header present (even empty): only the token counts (503 if the server
+       has no token configured, 401 if wrong); cookies are ignored and no CSRF check is made.
     b. No header, valid session cookie: role "admin" passes, role "user" gets 403; a
        POST/PUT/PATCH/DELETE must also pass require_csrf_safe_request (403).
-    c. No header, no valid session (none, expired, account disabled): same as (a) with
-       no token, so the answer stays 503/401.
+    c. No header, no valid session (none, expired, revoked, account disabled): 401
+       "Not signed in.", whether or not ADMIN_API_TOKEN is configured, so the UI can send
+       the user back to the log-in screen.
     """
     token = request.headers.get(ADMIN_TOKEN_HEADER)
     if token is None:
         user = find_session_user(request, db)
-        if user is not None:
-            check_csrf_if_state_changing(request)
-            if user.role != ROLE_ADMIN:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin role required")
-            return
+        if user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not signed in.")
+        check_csrf_if_state_changing(request)
+        if user.role != ROLE_ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin role required")
+        return
     _check_admin_token(token)
 
 

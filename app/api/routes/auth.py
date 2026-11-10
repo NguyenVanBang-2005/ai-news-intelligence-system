@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.auth_deps import (
     CurrentUser,
+    limit_login_attempts,
     limit_register_rate,
     login_failure_key,
     login_failure_limiter,
@@ -50,9 +51,17 @@ def register(payload: RegisterRequest, db: DbSession) -> UserRead:
     return UserRead.model_validate(user)
 
 
-@router.post("/login", response_model=UserRead)
+@router.post(
+    "/login",
+    response_model=UserRead,
+    dependencies=[Depends(limit_login_attempts)],
+)
 def login(payload: LoginRequest, request: Request, response: Response, db: DbSession) -> UserRead:
-    """Check the credentials and set the HttpOnly session cookie."""
+    """Check the credentials and set the HttpOnly session cookie.
+
+    limit_login_attempts (per address, every attempt) runs first; then the failed-login
+    limit per username + address.
+    """
     username = normalize_username(payload.username)
     failure_key = login_failure_key(request, username)
     limit = settings.auth_login_max_failures
@@ -107,8 +116,9 @@ def change_password_route(
     Wrong current passwords count in the login failure limiter (per account) -> 429.
     """
     failure_key = f"change-password|user:{user.id}"
-    limit = settings.auth_login_max_failures
-    retry_after = login_failure_limiter.blocked_for(failure_key, limit)
+    # Counted before the check (and forgotten on success), so parallel wrong tries cannot
+    # all slip past the limit while their hashes are being computed.
+    retry_after = login_failure_limiter.hit(failure_key, settings.auth_login_max_failures)
     if retry_after is not None:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -116,7 +126,6 @@ def change_password_route(
             headers={"Retry-After": str(retry_after)},
         )
     if not verify_password(payload.current_password, user.password_hash):
-        login_failure_limiter.hit(failure_key, limit)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=WRONG_CURRENT_PASSWORD)
     login_failure_limiter.forget(failure_key)
     if payload.new_password == payload.current_password:

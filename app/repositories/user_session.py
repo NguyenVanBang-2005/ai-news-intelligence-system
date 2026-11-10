@@ -27,6 +27,12 @@ class UserSessionRepository:
         self.db.execute(delete(UserSession).where(UserSession.token_hash == token_hash))
         self.db.commit()
 
+    def delete_for_user(self, user_id: int) -> int:
+        """Remove every session of the user; returns how many were removed."""
+        result = self.db.execute(delete(UserSession).where(UserSession.user_id == user_id))
+        self.db.commit()
+        return result.rowcount
+
     def delete_for_user_except(self, user_id: int, keep_token_hash: str) -> int:
         """Remove every session of the user but the one with `keep_token_hash`."""
         result = self.db.execute(
