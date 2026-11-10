@@ -3,8 +3,9 @@
 // Passwords are only sent to POST /api/v1/auth/change-password, never kept or logged.
 
 import { authErrorText, changePassword } from "./auth.js";
-import { el } from "./dom.js";
+import { el, setButtonBusy } from "./dom.js";
 import { keepFocusInside } from "./focus-trap.js";
+import { showToast } from "./toast.js";
 
 const BODY_LOCK_CLASS = "dialog-open";
 const TITLE_ID = "password-dialog-title";
@@ -15,25 +16,17 @@ const BUSY_TEXT = "Changing…";
 const HINT = `New password: ${MIN_CHARS}-${MAX_CHARS} characters, not your username and not the current one. `
   + "Your other signed-in browsers will be logged out.";
 
-const NOTICE_MS = 6000;
-
 /**
- * The "Change password" button for the account bar and the short notice shown next to it
- * after a change. Returns [button, notice].
+ * The "Change password" controls for the account bar (a list, spread into the bar).
+ * Success is announced with a toast that hides itself.
  */
 export function changePasswordControls() {
-  const notice = el("span", { className: "account-notice", role: "status" });
   const button = el("button", { className: "btn btn-secondary btn-small", type: "button", text: "Change password" });
-  let timer = null;
   button.addEventListener("click", () => openPasswordDialog({
     opener: button,
-    onChanged: () => {
-      notice.textContent = "Password changed. Other sessions were logged out.";
-      clearTimeout(timer);
-      timer = setTimeout(() => { notice.textContent = ""; }, NOTICE_MS);
-    },
+    onChanged: () => showToast("Password changed. Other sessions were logged out.", "success"),
   }));
-  return [button, notice];
+  return [button];
 }
 
 /** Opens the dialog. `onChanged()` runs after the server accepted the new password. */
@@ -128,7 +121,7 @@ function changeErrorText(error) {
 }
 
 function setBusy(view, busy) {
-  view.submitButton.disabled = busy;
+  setButtonBusy(view.submitButton, busy);
   view.cancel.disabled = busy;
   view.submitButton.textContent = busy ? BUSY_TEXT : SUBMIT_TEXT;
 }

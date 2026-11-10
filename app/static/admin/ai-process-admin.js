@@ -1,17 +1,30 @@
 // AI processing: POST /api/v1/ai/process (body {}), then poll GET /api/v1/ai/process/{id}
-// every few seconds until the job has succeeded or failed.
+// every few seconds until the job has succeeded or failed. A bar shows the state:
+// queued (pending) -> running -> done (succeeded) / failed; the CSS class changes, the
+// bar's colour and length follow with a transition.
 
-import { el } from "../js/dom.js";
+import { el, setButtonBusy } from "../js/dom.js";
+import { showToast } from "../js/toast.js";
 import { adminErrorText, adminRequest, messageBanner } from "./admin-api.js";
 
 export const POLL_INTERVAL_MS = 3000;
 const PROCESS_PATH = "/api/v1/ai/process";
 const FINISHED = new Set(["succeeded", "failed"]);
+// API status -> [class suffix, label shown to people].
+const JOB_STATES = {
+  pending: ["queued", "Queued"],
+  running: ["running", "Running"],
+  succeeded: ["done", "Done"],
+  failed: ["failed", "Failed"],
+};
 
 /** The AI processing card. */
 export function aiProcessPanel() {
   const view = {
     status: el("div", { className: "job-status", "aria-live": "polite" }),
+    progress: el("div", {
+      className: "job-progress job-progress-queued", role: "progressbar", "aria-label": "AI job progress", hidden: true,
+    }, el("span", { className: "job-progress-bar" })),
   };
   view.button = el("button", {
     className: "btn btn-primary", type: "button", text: "Start AI processing", onclick: () => startJob(view),
@@ -20,6 +33,7 @@ export function aiProcessPanel() {
     el("h2", { className: "panel-title", id: "ai-title", text: "AI processing" }),
     el("p", { className: "panel-subtitle", text: "Embeds new articles, groups them into topics and writes summaries. Runs in the background." }),
     view.button,
+    view.progress,
     view.status,
   ]);
   return view.node;
@@ -27,14 +41,16 @@ export function aiProcessPanel() {
 
 async function startJob(view) {
   if (view.button.disabled) return; // a job is being started or followed
-  view.button.disabled = true;
+  setButtonBusy(view.button, true);
+  showProgress(view.progress, "pending");
   try {
     const job = await adminRequest(PROCESS_PATH, { method: "POST", body: {} });
     await followJob(view, job);
   } catch (error) {
+    showProgress(view.progress, "failed"); // the job could not be started or followed
     view.status.replaceChildren(messageBanner(`AI processing could not run. ${adminErrorText(error)}`, "error"));
   } finally {
-    view.button.disabled = false;
+    setButtonBusy(view.button, false);
   }
 }
 
@@ -50,8 +66,20 @@ async function followJob(view, firstAnswer) {
   }
 }
 
+function showProgress(progress, status) {
+  const [suffix, label] = JOB_STATES[status] ?? JOB_STATES.pending;
+  progress.hidden = false;
+  progress.className = `job-progress job-progress-${suffix}`;
+  progress.setAttribute("aria-valuetext", label);
+  return label;
+}
+
 function showJob(view, job) {
-  const lines = [el("p", { className: "job-line", text: `Job ${job.id}: ${job.status}` })];
+  const label = showProgress(view.progress, job.status);
+  // followJob stops at the first finished answer, so each toast shows once per job.
+  if (job.status === "succeeded") showToast("AI processing finished.", "success");
+  if (job.status === "failed") showToast("AI processing failed.", "error");
+  const lines = [el("p", { className: "job-line", text: `Job ${job.id}: ${label}` })];
   if (job.status === "succeeded") {
     lines.push(el("pre", { className: "job-result", text: JSON.stringify(job.result, null, 2) }));
   } else if (job.status === "failed") {

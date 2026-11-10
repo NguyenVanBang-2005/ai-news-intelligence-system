@@ -5,7 +5,7 @@
 import { badge } from "./components.js";
 import { authErrorText, fetchCurrentUser, logOut } from "./auth.js";
 import { openAuthDialog } from "./auth-dialog.js";
-import { el } from "./dom.js";
+import { el, setButtonBusy } from "./dom.js";
 import { changePasswordControls } from "./password-dialog.js";
 
 const ADMIN_PATH = "/admin/";
@@ -48,12 +48,12 @@ function signedIn(root, user) {
 }
 
 async function endSession(root, button, message) {
-  button.disabled = true;
+  setButtonBusy(button, true);
   try {
     await logOut();
     showUser(root, null);
   } catch (error) {
     message.textContent = authErrorText(error);
-    button.disabled = false;
+    setButtonBusy(button, false);
   }
 }

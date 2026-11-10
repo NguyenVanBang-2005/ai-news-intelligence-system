@@ -3,7 +3,7 @@
 
 import { request, SEARCH_TIMEOUT_MS } from "../api.js";
 import { card, errorBanner, infoBanner, loading } from "../components.js";
-import { el } from "../dom.js";
+import { el, setButtonBusy } from "../dom.js";
 import { fetchTrending } from "../trending.js";
 import { resultsPanel } from "./search-results.js";
 import { trendingChips, trendingSidebar } from "./trending-ui.js";
@@ -87,7 +87,7 @@ function showLoadingWithSlowHint(view) {
 
 function setBusy(view, busy) {
   view.busy = busy;
-  view.button.disabled = busy;
+  setButtonBusy(view.button, busy);
   view.button.textContent = busy ? "Searching…" : "Search";
   view.results.setAttribute("aria-busy", String(busy));
 }

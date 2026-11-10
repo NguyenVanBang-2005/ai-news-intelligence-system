@@ -266,8 +266,8 @@ def test_change_password_errors_and_notice_are_plain_text() -> None:
     assert 'if (error?.status === 401) return "Your session has ended.' in dialog
     assert "return authErrorText(error);" in dialog  # 400 / 422 / 429 detail via detailText
     assert 'el("p", { className: "banner banner-error", role: "alert", text })' in dialog
-    assert 'notice.textContent = "Password changed.' in dialog
-    for class_name in ("account-notice", "auth-form", "form-note", "form-message"):
+    assert 'showToast("Password changed.' in dialog
+    for class_name in ("toast", "auth-form", "form-note", "form-message"):
         assert f".{class_name}" in STYLE
 
 

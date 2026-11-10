@@ -7,15 +7,15 @@
   --color-header: #ffffff; /* must stay pure white: the logo image has a white background */
   --color-border: #e3e8f0;
   --color-text: #1b2333;
-  --color-text-muted: #6b7689;
+  --color-text-muted: #5f6a7d; /* 5.1:1 on --color-bg (WCAG AA) */
   --color-primary: #2f5bea;
   --color-primary-dark: #2449c4;
   --color-primary-soft: #eaf0ff;
-  --color-success: #1f9d68;
+  --color-success: #177a52;  /* ok: >= 4.8:1 on white and its soft tint */
   --color-success-soft: #e7f7f0;
-  --color-warning: #b26f12;
+  --color-warning: #955a08;  /* warn */
   --color-warning-soft: #fff4e5;
-  --color-danger: #c63a32;
+  --color-danger: #b3332c;   /* error */
   --color-danger-soft: #fdecea;
   --color-hero-from: #0b1f45;
   --color-hero-to: #14306a;
@@ -47,6 +47,18 @@
   --radius-pill: 999px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
   --shadow-search: 0 12px 32px rgba(5, 15, 40, 0.35);
+  --shadow-raised: 0 4px 12px rgba(16, 24, 40, 0.1), 0 2px 4px rgba(16, 24, 40, 0.06);
+  --shadow-overlay: 0 16px 48px rgba(5, 15, 40, 0.35);
+  --color-focus: #2f5bea;
+  --color-skeleton: #e6eaf2;
+  --color-skeleton-shine: rgba(255, 255, 255, 0.7);
+
+  /* Motion: three durations and one easing curve. Only transform and opacity move. */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --stagger-step: 40ms;
 
   /* Layout */
   --content-width: 1040px;
@@ -480,6 +492,7 @@ body.drawer-open { overflow: hidden; }
   inset: 0;
   z-index: 20;
   background: rgba(11, 31, 69, 0.45);
+  animation: fade-in var(--duration-base) var(--ease);
 }
 
 .drawer {
@@ -493,7 +506,7 @@ body.drawer-open { overflow: hidden; }
   width: min(600px, 100%);
   background: var(--color-surface);
   box-shadow: -8px 0 32px rgba(5, 15, 40, 0.25);
-  animation: drawer-in 0.2s ease-out;
+  animation: drawer-in var(--duration-base) var(--ease);
 }
 
 @keyframes drawer-in {
@@ -663,7 +676,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .btn { min-height: 40px; }
 .btn-block { width: 100%; }
 .btn-danger { color: #fff; background: var(--color-danger); }
-.btn-danger:hover { background: #a92f28; }
+.btn-danger:hover { background: #962a24; }
 .btn:disabled { cursor: not-allowed; }
 .btn[aria-busy="true"] { cursor: wait; }
 
@@ -676,6 +689,7 @@ body.dialog-open { overflow: hidden; }
 
 .dialog-backdrop {
   position: fixed;
+  animation: fade-in var(--duration-base) var(--ease);
   inset: 0;
   z-index: 30;
   background: rgba(11, 31, 69, 0.55);
@@ -692,8 +706,10 @@ body.dialog-open { overflow: hidden; }
   padding: var(--space-6);
   background: var(--color-surface);
   border-radius: var(--radius-md);
-  box-shadow: 0 16px 48px rgba(5, 15, 40, 0.35);
+  box-shadow: var(--shadow-overlay);
   transform: translate(-50%, -50%);
+  overscroll-behavior: contain;
+  animation: dialog-in var(--duration-base) var(--ease);
 }
 
 .dialog-title { margin: 0 0 var(--space-3); font-size: var(--font-size-lg); overflow-wrap: anywhere; }
@@ -909,7 +925,7 @@ body.dialog-open { overflow: hidden; }
   height: 22px;
   background: #c9d1de;
   border-radius: var(--radius-pill);
-  transition: background 0.15s;
+  transition: background-color var(--duration-fast) var(--ease);
 }
 
 .switch-knob {
@@ -920,7 +936,7 @@ body.dialog-open { overflow: hidden; }
   height: 16px;
   background: #fff;
   border-radius: 50%;
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast) var(--ease);
 }
 
 .switch[aria-checked="true"]::before { background: var(--color-primary); }
@@ -1161,8 +1177,6 @@ body.dialog-open { overflow: hidden; }
 .account-note { color: var(--color-text-muted); }
 .account-error { color: var(--color-danger); font-size: var(--font-size-xs); }
 .account-error:empty { display: none; }
-.account-notice { color: var(--color-success); font-size: var(--font-size-xs); }
-.account-notice:empty { display: none; }
 .btn-small { padding: var(--space-2) var(--space-3); }
 .btn-link {
   padding: 0;
@@ -1191,7 +1205,7 @@ body.dialog-open { overflow: hidden; }
 .admin-gate .btn { display: inline-block; text-decoration: none; }
 .cell-actions .btn-small { margin-right: var(--space-2); }
 /* Wide enough for "Disabling…", so the row does not jump while the PATCH runs. */
-.btn-toggle { min-width: 6.5rem; }
+.btn-toggle { min-width: 8.5rem; }
 .job-line { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); font-weight: 600; overflow-wrap: anywhere; }
 .job-result {
   max-height: 320px;
@@ -1206,4 +1220,296 @@ body.dialog-open { overflow: hidden; }
 
 @media (min-width: 900px) {
   .admin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* =====================================================================================
+   Motion and polish layer
+   Rules: only transform and opacity move (colors may fade); nothing animates width,
+   height, top or left; at most 320 ms; only the skeleton shimmer, the busy spinner and
+   the running AI job bar loop. Everything is switched off by prefers-reduced-motion
+   (last block of this file).
+   ===================================================================================== */
+
+:root { color-scheme: light; }
+
+html { scroll-behavior: smooth; }
+
+/* --- Keyframes ----------------------------------------------------------------------- */
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes item-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+/* The dialog is centred with translate(-50%, -50%), so the keyframes keep that part. */
+@keyframes dialog-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(12px); }
+}
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes job-run { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* --- Page load and tab change -------------------------------------------------------- */
+
+/* Whatever a page puts into <main> rises in once. */
+.app > * { animation: rise-in var(--duration-slow) var(--ease) both; }
+
+/* Tab change (Search / Topics / Sources): the old page fades out (router.js adds the class
+   for --duration-fast), then the new one fades in with the rule above. */
+.app.route-leaving > * { animation: fade-out var(--duration-fast) var(--ease) both; }
+
+/* --- Lists appear one after another (first 8 items, 40 ms apart) --------------------- */
+
+.result-list > li,
+.topic-grid > *,
+.trend-list > li,
+.classified-list > li,
+.topic-article-list > li,
+.chart-list > li,
+.source-table tbody > tr {
+  animation: item-in var(--duration-base) var(--ease) both;
+}
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(2) { animation-delay: calc(1 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(3) { animation-delay: calc(2 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(4) { animation-delay: calc(3 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(5) { animation-delay: calc(4 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(6) { animation-delay: calc(5 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(7) { animation-delay: calc(6 * var(--stagger-step)); }
+:is(.result-list, .topic-grid, .trend-list, .classified-list, .topic-article-list, .chart-list, .source-table tbody) > :nth-child(n+8) { animation-delay: calc(7 * var(--stagger-step)); }
+
+/* --- Score bars (similarity, confidence, trending) grow from the left ---------------- */
+
+.meter,
+.trend-bar {
+  transform-origin: left center;
+  animation: bar-grow var(--duration-slow) var(--ease) both;
+}
+
+/* --- Buttons, chips and clickable cards ---------------------------------------------- */
+
+.btn,
+.chip,
+.pill,
+.result-open,
+.btn-icon,
+.drawer-close,
+.nav-link,
+.topic-card,
+.result-card {
+  transition:
+    transform var(--duration-fast) var(--ease),
+    opacity var(--duration-base) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
+    background-color var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .btn:hover:not(:disabled),
+  .chip:hover,
+  .pill:hover:not(:disabled),
+  .result-open:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-raised);
+  }
+  .topic-card:hover,
+  .result-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
+}
+
+.btn:active:not(:disabled),
+.chip:active,
+.pill:active:not(:disabled),
+.result-open:active,
+.btn-icon:active:not(:disabled),
+.drawer-close:active,
+.topic-card:active { transform: translateY(0) scale(0.98); box-shadow: none; }
+
+/* One clear focus ring everywhere (keyboard only); white on the dark hero. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.hero :where(a, button, input):focus-visible { outline-color: #fff; }
+
+/* Busy buttons: a small CSS spinner before the label (set with aria-busy="true"). */
+.btn[aria-busy="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: var(--space-2);
+  vertical-align: -0.12em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Touch targets of at least 40 px. */
+.chip,
+.pill,
+.result-open,
+.btn-link { min-height: 40px; }
+.chip, .pill, .result-open { display: inline-flex; align-items: center; justify-content: center; }
+.btn-link { display: inline-flex; align-items: center; }
+.nav-link { display: inline-flex; align-items: center; min-height: 40px; }
+
+/* --- Loading skeleton ---------------------------------------------------------------- */
+
+.skeleton { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) 0; }
+.skeleton-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-skeleton);
+}
+.skeleton-line:nth-child(2) { width: 85%; }
+.skeleton-line:nth-child(3) { width: 60%; }
+.skeleton-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--color-skeleton-shine), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 1.2s var(--ease) infinite;
+}
+.skeleton-caption { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+/* --- Empty state with a static icon (symbol drawn in the page's HTML) --------------- */
+
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.state-empty-icon {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto var(--space-3);
+  color: var(--color-primary);
+  opacity: 0.55;
+}
+
+/* --- Toasts -------------------------------------------------------------------------- */
+
+.toast-region {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(420px, calc(100% - 2 * var(--space-4)));
+  pointer-events: none;
+}
+.toast {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+  pointer-events: auto;
+  animation: toast-in var(--duration-slow) var(--ease) both;
+}
+.toast-success { border-left-color: var(--color-success); }
+.toast-error { border-left-color: var(--color-danger); }
+.toast-leaving { opacity: 0; animation: toast-out var(--duration-base) var(--ease) both; }
+
+/* --- AI job progress (queued -> running -> done / failed) --------------------------- */
+
+.job-progress {
+  position: relative;
+  align-self: stretch;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+}
+.job-progress[hidden] { display: none; }
+.job-progress-bar {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--color-text-muted);
+  transform-origin: left center;
+  transform: scaleX(0.08);
+  transition:
+    transform var(--duration-slow) var(--ease),
+    background-color var(--duration-slow) var(--ease);
+}
+.job-progress-queued .job-progress-bar { transform: scaleX(0.08); }
+.job-progress-running .job-progress-bar { background: var(--color-primary); transform: scaleX(0.6); }
+.job-progress-done .job-progress-bar { background: var(--color-success); transform: scaleX(1); }
+.job-progress-failed .job-progress-bar { background: var(--color-danger); transform: scaleX(1); }
+/* While running, a light band moves along the bar. */
+.job-progress-running .job-progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: job-run 1.4s linear infinite;
+}
+
+/* --- Long lists scroll smoothly ------------------------------------------------------ */
+
+.source-list-body,
+.drawer-body,
+.dialog { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+.drawer-body { overscroll-behavior: contain; }
+
+/* --- Small screens: compact top bar (down to 400 px) --------------------------------- */
+
+@media (max-width: 480px) {
+  .topbar { gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+  /* One row that scrolls sideways instead of wrapping onto several lines. */
+  .nav {
+    flex-wrap: nowrap;
+    gap: var(--space-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-link { flex: 0 0 auto; white-space: nowrap; }
+  .account { width: 100%; }
+  .account .btn { width: auto; }
+  .toast-region { left: var(--space-3); right: var(--space-3); bottom: var(--space-3); max-width: none; align-items: stretch; }
+}
+
+/* --- Reduced motion: no animation, no transition, no smooth scrolling ---------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }

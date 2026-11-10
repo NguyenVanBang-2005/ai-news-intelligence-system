@@ -2,7 +2,7 @@
 // four counts and every error the server returned.
 
 import { loading } from "../js/components.js";
-import { el } from "../js/dom.js";
+import { el, setButtonBusy } from "../js/dom.js";
 import { formatCount } from "../js/format.js";
 import { adminErrorText, adminRequest, messageBanner } from "./admin-api.js";
 
@@ -44,7 +44,7 @@ async function runIngestion(view, source) {
   }
   setBusy(view, true);
   const target = source ? `source "${source.name}"` : "all active sources";
-  view.report.replaceChildren(loading(`Ingesting ${target}… This can take a few minutes.`));
+  view.report.replaceChildren(loading(`Ingesting ${target}…`, { caption: `Ingesting ${target}… This can take a few minutes.` }));
   try {
     const path = source ? `${RUN_PATH}?source_id=${encodeURIComponent(source.id)}` : RUN_PATH;
     const result = await adminRequest(path, { method: "POST", timeoutMs: RESCAN_TIMEOUT_MS });
@@ -59,7 +59,7 @@ async function runIngestion(view, source) {
 
 function setBusy(view, busy) {
   view.busy = busy;
-  view.allButton.disabled = busy;
+  setButtonBusy(view.allButton, busy);
 }
 
 function resultCard(target, result) {

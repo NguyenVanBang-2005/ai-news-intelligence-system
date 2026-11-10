@@ -4,9 +4,10 @@
 
 import { badge, emptyState, loading } from "../js/components.js";
 import { confirmDialog } from "../js/confirm-dialog.js";
-import { el } from "../js/dom.js";
+import { el, setButtonBusy } from "../js/dom.js";
 import { formatDateTime } from "../js/format.js";
 import { languageName, sourceStatus } from "../js/pages/source-status.js";
+import { showToast } from "../js/toast.js";
 import { adminErrorText, adminRequest, messageBanner } from "./admin-api.js";
 
 const SOURCES_PATH = "/api/v1/sources";
@@ -47,7 +48,7 @@ function renderList(view, sources) {
   view.sources = sources;
   showCount(view);
   if (sources.length === 0) {
-    view.body.replaceChildren(emptyState("No sources yet. Add one with the form."));
+    view.body.replaceChildren(emptyState("No sources yet.", "Add an RSS or Atom feed with the form."));
     return;
   }
   const head = el("thead", {}, el("tr", {}, ["Source", "Type", "Language", "Status", "Last sync", "Actions"]
@@ -88,11 +89,11 @@ function ingestButton(view, source) {
     className: "btn btn-secondary btn-small", type: "button", text: "Ingest", "aria-label": `Ingest ${source.name}`,
   });
   button.addEventListener("click", async () => {
-    button.disabled = true;
+    setButtonBusy(button, true);
     try {
       await view.onIngest(source);
     } finally {
-      button.disabled = false;
+      setButtonBusy(button, false);
     }
   });
   return button;
@@ -129,7 +130,8 @@ async function setActive(view, source, button) {
       fresh.querySelector(".btn-toggle")?.focus(); // keep keyboard focus on the same control
     }
     const word = updated.is_active ? "enabled" : "disabled";
-    view.message.replaceChildren(messageBanner(`Source ${word}: ${updated.name}`, "info"));
+    view.message.replaceChildren();
+    showToast(`Source ${word}: ${updated.name}`, "success");
   } catch (error) {
     view.message.replaceChildren(messageBanner(`The source was not changed. ${adminErrorText(error)}`, "error"));
     if (button.isConnected) {
@@ -162,7 +164,8 @@ async function askToDelete(view, source, button) {
 async function deleteSource(view, source) {
   try {
     await adminRequest(`${SOURCES_PATH}/${encodeURIComponent(source.id)}`, { method: "DELETE" });
-    view.message.replaceChildren(messageBanner(`Source deleted: ${source.name}`, "info"));
+    view.message.replaceChildren();
+    showToast(`Source deleted: ${source.name}`, "success");
   } catch (error) {
     view.message.replaceChildren(messageBanner(`The source was not deleted. ${adminErrorText(error)}`, "error"));
   }

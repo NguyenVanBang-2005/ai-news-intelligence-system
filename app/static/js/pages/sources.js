@@ -53,7 +53,7 @@ async function loadSources(body) {
 }
 
 function sourceTable(sources) {
-  if (sources.length === 0) return emptyState("No sources yet.");
+  if (sources.length === 0) return emptyState("No sources yet.", "An administrator can add RSS feeds on the Admin page.");
   const head = el("thead", {}, el("tr", {}, ["Source", "Type", "Language", "Status"]
     .map((text) => el("th", { scope: "col", text }))));
   return el("table", { className: "source-table" }, [head, el("tbody", {}, sources.map(sourceRow))]);

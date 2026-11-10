@@ -67,7 +67,7 @@ function showPage(view, items, total) {
   view.list.append(...items.map(articleRow));
   view.offset += items.length;
   view.count.textContent = `${formatCount(total)} article${total === 1 ? "" : "s"}, newest first`;
-  view.status.replaceChildren(total === 0 ? emptyState("No articles in this topic.") : "");
+  view.status.replaceChildren(total === 0 ? emptyState("No articles in this topic.", "Pick another topic card above.") : "");
   view.more.hidden = items.length === 0 || view.offset >= total;
 }
 

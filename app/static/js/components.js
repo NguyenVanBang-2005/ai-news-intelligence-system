@@ -1,16 +1,29 @@
 // Shared pieces: loading, empty state, error banner, badge, card, "Coming soon".
 
-import { el } from "./dom.js";
+import { el, svgIcon } from "./dom.js";
 
 const LINK_NOT_SUPPORTED = "Article links aren't supported on this page.";
 const BAD_LENGTH = "Please enter 2 to 500 characters.";
 
-export function loading(message = "Loading…") {
-  return el("p", { className: "state state-loading", role: "status", text: message });
+/**
+ * A shimmering skeleton while something loads. `message` is read by screen readers;
+ * `caption` (optional) is also shown, for waits that need an explanation.
+ */
+export function loading(message = "Loading…", { caption = "" } = {}) {
+  return el("div", { className: "state state-loading skeleton", role: "status" }, [
+    el("span", { className: "skeleton-line", "aria-hidden": "true" }),
+    el("span", { className: "skeleton-line", "aria-hidden": "true" }),
+    el("span", { className: "skeleton-line", "aria-hidden": "true" }),
+    caption
+      ? el("p", { className: "skeleton-caption", text: caption })
+      : el("span", { className: "visually-hidden", text: message }),
+  ]);
 }
 
+/** Nothing to show: a static icon, a title and (optionally) what to do next. */
 export function emptyState(title, hint = "") {
   return el("div", { className: "state state-empty" }, [
+    svgIcon("icon-empty", "state-empty-icon"),
     el("p", { className: "state-empty-title", text: title }),
     hint ? el("p", { className: "state", text: hint }) : null,
   ]);
