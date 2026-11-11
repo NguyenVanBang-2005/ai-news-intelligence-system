@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine, delete, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -148,8 +148,37 @@ def test_expired_admin_session_falls_back_to_token_check(
         db.execute(update(UserSession).values(expires_at=datetime.now(UTC) - timedelta(1)))
         db.commit()
     assert client.delete("/api/v1/sources/999999", headers=CSRF).status_code == 401
+    # Without a server token it is still "not signed in" (401), never the 503 of (a).
     monkeypatch.setattr(settings, "admin_api_token", None)
-    assert client.delete("/api/v1/sources/999999", headers=CSRF).status_code == 503
+    response = client.delete("/api/v1/sources/999999", headers=CSRF)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not signed in."}
+
+
+@pytest.mark.parametrize("configured", [None, ""])
+def test_revoked_admin_session_without_server_token_is_401(
+    client, sqlite_engine, monkeypatch: pytest.MonkeyPatch, configured
+) -> None:
+    sign_in(client, sqlite_engine, "admin")
+    with Session(sqlite_engine) as db:
+        db.execute(delete(UserSession))  # e.g. ended by a password change elsewhere
+        db.commit()
+    monkeypatch.setattr(settings, "admin_api_token", configured)
+    for method, path, kwargs in PROTECTED:
+        response = send(client, method, path, kwargs, CSRF)
+        assert response.status_code == 401, (method, path)
+        assert response.json() == {"detail": "Not signed in."}
+
+
+def test_token_header_without_server_token_is_503(
+    client, sqlite_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sign_in(client, sqlite_engine, "admin")  # a valid admin cookie does not change it
+    monkeypatch.setattr(settings, "admin_api_token", None)
+    response = client.get(
+        "/api/v1/ai/process/no-such-job", headers={"X-Admin-Token": TEST_ADMIN_TOKEN}
+    )
+    assert response.status_code == 503
 
 
 def test_disabled_admin_falls_back_to_token_check(client, sqlite_engine) -> None:

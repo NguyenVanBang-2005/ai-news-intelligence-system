@@ -90,10 +90,23 @@ Prefix `/api/v1` (`settings.api_v1_prefix`, app/main.py:15). Auth admin = header
 | POST | `/api/v1/ai/ask` | admin | `AskRequest`: input:str (2-1500; nhận link) | `AskResponse`: answer:str\|None, sources:list[AskSource] | routes/ask.py:23; schemas/ask.py:36 |
 | POST | `/api/v1/ai/process` | admin | `AIProcessRequest`: limit, duplicate_threshold (0.70-1.0), force:bool | 202 `AIJobRead`: id:str, status: pending\|running\|succeeded\|failed, result: AIProcessResult\|None, error:str\|None, created_at, started_at, finished_at | routes/ai.py:27; schemas/ai.py:9,39 |
 | GET | `/api/v1/ai/process/{job_id}` | **public** | - | `AIJobRead`; 404 | routes/ai.py:90 |
+| GET | `/api/v1/auth/me` | phiên cookie | - | `UserRead`: id:int, username:str, role: "user"\|"admin" (không có hash/salt); 401 | routes/auth.py; schemas/auth.py |
+| POST | `/api/v1/auth/change-password` | phiên cookie + CSRF (`X-Requested-With: ainis`, Origin trùng Host) | `ChangePasswordRequest`: current_password(1-128), new_password(10-128, khác username và khác mật khẩu hiện tại); field lạ -> 422 | 204; 400 sai mật khẩu hiện tại; 422 mật khẩu mới vi phạm quy tắc; 429 + Retry-After sau `AUTH_LOGIN_MAX_FAILURES` lần sai/tài khoản; 401 không có phiên (kể cả khi gửi `X-Admin-Token`); 403 thiếu CSRF. Thành công: băm lại scrypt, xóa mọi phiên khác của user, giữ phiên hiện tại | routes/auth.py; services/auth.py |
 
 `AIProcessResult` (schemas/ai.py:25): documents_received, unique_documents, semantic_duplicates, topics_created, articles_updated, confidence_method ("hdbscan_soft"\|"fallback"), topic_coherence:float\|None.
 
 Models: `Source` (app/models/source.py: id, name, type, feed_url, query, language, is_active, created_at) · `Article` (app/models/article.py: id, source_id, title, url, author, content, summary, ai_summary, topic, confidence, status, embedding, embedding_key, published_at, created_at) · `Topic` (app/models/topic.py: id, label, centroid, article_count, keywords, representative_article_ids, updated_at) · `AIJob` (app/models/ai_job.py). Migrations `alembic/versions/0001`-`0006` khớp các cột trên; không có cột `last_synced_at`, `last_error`, `classified_at`, `is_full_text`.
+
+### Who can call what
+
+| Ai | Gọi được |
+|---|---|
+| Ẩn danh | Endpoint public ở bảng trên, `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` (không có cookie -> 204) |
+| Phiên `user` | Như ẩn danh + `GET /auth/me`, `POST /auth/change-password`; endpoint admin -> 403 |
+| Phiên `admin` | Như phiên `user` + mọi endpoint admin (`POST`/`PATCH`/`DELETE /sources`, `POST /ingestion/run`, `POST /ai/process`, `POST /ai/ask`); UI `/admin/` có nút Enable/Disable gọi `PATCH /sources/{id}` `{is_active}` |
+| `X-Admin-Token` (script) | Endpoint admin; **không** dùng được cho `/auth/me` và `/auth/change-password` (401, vì token không phải user) |
+
+Mọi `POST`/`PATCH`/`DELETE` kèm cookie phiên phải gửi `X-Requested-With: ainis` (UI gửi qua `request()` trong `app/static/js/api.js`), nếu không -> 403.
 
 Giá trị `Article.status` thật (code): `pending` (default model), `analyzed`, `missing_content` (app/services/ingestion.py:20-21), `ai_analyzed` (repositories/article.py:303).
 

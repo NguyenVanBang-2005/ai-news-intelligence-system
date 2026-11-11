@@ -101,7 +101,7 @@ function articleList(items, topic) {
   if (items.length === 0) {
     return topic === null
       ? emptyState("No classified articles yet.", NO_TOPICS_HINT)
-      : emptyState("No classified articles for this topic.");
+      : emptyState("No classified articles for this topic.", "Pick another topic to see its articles.");
   }
   return el("ol", { className: "classified-list" }, items.map(articleRow));
 }

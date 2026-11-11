@@ -167,6 +167,65 @@ def test_successful_login_clears_failures(client: TestClient) -> None:
         assert login(client, password="not the password").status_code == 401
 
 
+def count_hashing(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every password check authenticate() makes (real or dummy)."""
+    import app.services.auth as auth_service
+
+    calls: list[str] = []
+    real_verify, real_dummy = auth_service.verify_password, auth_service.verify_dummy
+
+    def verify(password: str, stored_hash: str) -> bool:
+        calls.append("verify")
+        return real_verify(password, stored_hash)
+
+    def dummy(password: str) -> None:
+        calls.append("dummy")
+        real_dummy(password)
+
+    monkeypatch.setattr(auth_service, "verify_password", verify)
+    monkeypatch.setattr(auth_service, "verify_dummy", dummy)
+    return calls
+
+
+def test_login_flood_from_one_address_is_429_without_hashing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = count_hashing(monkeypatch)
+    limit = settings.login_ip_max_attempts
+    for index in range(limit):
+        assert login(client, username=f"random-{index}").status_code == 401
+    assert len(calls) == limit
+    for index in range(3):
+        refused = login(client, username=f"more-{index}")
+        assert refused.status_code == 429
+        assert int(refused.headers["Retry-After"]) >= 1
+    assert len(calls) == limit  # refused attempts never reached scrypt
+
+
+def test_successful_login_does_not_reset_the_address_limit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "login_ip_max_attempts", 3)
+    register(client)
+    assert login(client, password="not the password").status_code == 401
+    assert login(client).status_code == 200
+    assert login(client).status_code == 200
+    assert login(client).status_code == 429  # even the right password
+
+
+def test_address_limit_window_ends(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api.auth_deps import login_ip_limiter
+
+    now = [1000.0]
+    monkeypatch.setattr(login_ip_limiter, "clock", lambda: now[0])
+    monkeypatch.setattr(settings, "login_ip_max_attempts", 1)
+    register(client)
+    assert login(client).status_code == 200
+    assert login(client).status_code == 429
+    now[0] += login_ip_limiter.window_seconds + 1
+    assert login(client).status_code == 200
+
+
 def test_logout_without_cookie_is_204(client: TestClient) -> None:
     assert client.post("/api/v1/auth/logout").status_code == 204
 

@@ -2,7 +2,7 @@
 // four counts and every error the server returned.
 
 import { loading } from "../js/components.js";
-import { el } from "../js/dom.js";
+import { el, setButtonBusy } from "../js/dom.js";
 import { formatCount } from "../js/format.js";
 import { adminErrorText, adminRequest, messageBanner } from "./admin-api.js";
 
@@ -44,7 +44,7 @@ async function runIngestion(view, source) {
   }
   setBusy(view, true);
   const target = source ? `source "${source.name}"` : "all active sources";
-  view.report.replaceChildren(loading(`Ingesting ${target}… This can take a few minutes.`));
+  view.report.replaceChildren(loading(`Ingesting ${target}…`, { caption: `Ingesting ${target}… This can take a few minutes.` }));
   try {
     const path = source ? `${RUN_PATH}?source_id=${encodeURIComponent(source.id)}` : RUN_PATH;
     const result = await adminRequest(path, { method: "POST", timeoutMs: RESCAN_TIMEOUT_MS });
@@ -59,7 +59,7 @@ async function runIngestion(view, source) {
 
 function setBusy(view, busy) {
   view.busy = busy;
-  view.allButton.disabled = busy;
+  setButtonBusy(view.allButton, busy);
 }
 
 function resultCard(target, result) {
@@ -72,10 +72,15 @@ function resultCard(target, result) {
       el("code", { className: "stat-field", text: count.key }),
     ]))),
     el("div", { className: "rescan-errors" }, [
-      el("h3", { className: "rescan-errors-title", text: `Errors (${errors.length})` }),
+      el("h3", { className: errorsTitleClass(errors.length), text: `Errors (${errors.length})` }),
       errors.length
         ? el("ul", {}, errors.map((text) => el("li", { text: String(text) })))
         : el("p", { className: "state", text: "No errors." }),
     ]),
   ]);
+}
+
+// Red only when there is at least one error; "Errors (0)" stays neutral.
+export function errorsTitleClass(count) {
+  return count > 0 ? "rescan-errors-title rescan-errors-title-danger" : "rescan-errors-title";
 }

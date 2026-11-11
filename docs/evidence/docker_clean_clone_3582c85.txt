@@ -1,0 +1,219 @@
+Docker clean-clone check of README "Quick start B" (grader role)
+=================================================================
+Date (UTC):   2026-11-11, 14:09 - ~14:35 (local time UTC+7)
+Commit:       3582c85 (branch feat/auth) "docs(compose): fix compose.dev.yaml comment (not auto-loaded)"
+Host:         Windows 11 (10.0.26200), Git Bash (MINGW64), Docker Desktop
+Docker:       Docker version 29.8.0, build 88096ef
+Compose:      Docker Compose version v5.5.1
+Clone:        ../ainis_cleanclone_3582c85 (sibling of the repository)
+Project:      -p ainis_fresh (isolated); API on 127.0.0.1:8012
+No secrets in this file: the database and admin passwords were generated with
+`openssl rand`, written to files with printf and never printed.
+
+Differences from README (all deliberate, for isolation on a machine that already
+runs other stacks):
+  D1. Every compose command carries `-p ainis_fresh -f compose.yaml -f <override>`.
+      README runs plain `docker compose ...`.
+  D2. Override file outside the clone: local-data/compose.fresh_clone.yaml (not committed):
+        services:
+          migrate: { image: ai-news-intelligence:fresh }
+          api:     { image: ai-news-intelligence:fresh, ports: !override ["127.0.0.1:8012:8000"] }
+      i.e. API on 8012 instead of 8001 and its own image tag (so the tag
+      ai-news-intelligence:local used by ainis_main is not overwritten). compose.yaml unchanged.
+      The prompt named local-data/compose.fresh.yaml; that older file publishes the DB on
+      127.0.0.1:55434, which contradicts check 6i, so compose.fresh_clone.yaml was used.
+  D3. Step 3 (create admin) used the README's non-TTY path (AINIS_NEW_ADMIN_PASSWORD +
+      `exec -T -e`), with the password read from a file instead of `read -rs`.
+  D4. The clone directory already existed from an earlier attempt today (18:19 local,
+      same HEAD 3582c85). Checked before use: `git log -1` = 3582c85, `git status
+      --short --ignored` showed only `!! .env`, no local-data/, no backups/. The .env was
+      overwritten by `cp .env.example .env` (step 2). It is not a byte-new clone, but the
+      working tree was identical to one.
+  D5. Docker build cache was NOT empty: the base image python:3.12-slim and the layers
+      `WORKDIR /app`, `COPY requirements.txt .` were CACHED. pip install (754 s), model
+      download (77 s) and image export (187 s) ran in full. A machine with no cache also
+      has to pull python:3.12-slim (CHUA KIEM / NOT MEASURED here).
+  Note: an earlier attempt (local-data/fresh_build.prev_attempt.log, 20:55 local) failed
+  during pip install with "target migrate: failed to receive status: rpc error: code =
+  Unavailable desc = error reading from server: EOF" while downloading
+  nvidia_cudnn_cu13 (519 MB). Not reproduced in this run.
+
+------------------------------------------------------------------
+Step 0. Pre-checks
+  $ git --no-pager status --short     -> only ?? scripts/build_review_csv.py, ?? tests/test_build_review_csv.py
+  $ docker ps --format '{{.Names}}'   -> saved to local-data/cleanclone_containers_before.txt
+      ainis-main-db-1, ainis_dockertest-api-1, ainis_dockertest-db-1, ainis_e2e-api-1,
+      ainis_e2e-db-1, ainis_main-api-1, ainis_main-db-1
+  $ docker compose -p ainis_fresh ps -a  -> empty (no old stack)
+  $ netstat -ano | grep -E ":8012 "      -> nothing (port free)
+
+Step 1. Clone
+  $ git clone --no-hardlinks --branch feat/auth <repo> ../ainis_cleanclone_3582c85   (see D4)
+  $ git -C ../ainis_cleanclone_3582c85 log --oneline -1  -> 3582c85 (= HEAD)       PASS
+  no local-data/, no backups/ in the clone; .env only from earlier attempt (D4)
+
+Step 2. .env
+  $ cp .env.example .env
+  $ sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=<openssl rand -hex 24>/" .env
+  Only POSTGRES_PASSWORD changed (the only required variable in the README table).
+  COMPOSE_PROJECT_NAME not in .env (grep count 0). API_PORT left at 8001 (override maps 8012).
+  `compose config`: only api publishes a port (127.0.0.1:8012 -> 8000).
+
+Step 3. Build and start
+  $ docker compose -p ainis_fresh -f compose.yaml -f ../ai-news-intelligence-backend-mvp/local-data/compose.fresh_clone.yaml up -d --build
+    (log: local-data/fresh_build.log)
+  Start 14:10:28Z, end 14:27:39Z -> 1031 s (17 min 11 s), exit 0.        PASS
+    pip install -r requirements.txt   753.9 s
+    model download (baked)              77.4 s
+    exporting image                    187.1 s
+  Build warnings: pip "running as root" warning; HF Hub "unauthenticated requests" (harmless).
+  $ docker image ls
+    ai-news-intelligence:fresh   366dfc76a07d   11.1GB (disk usage)   3.83GB (content size)
+  api container StartedAt 14:27:38.76Z; /api/v1/health first returned
+  {"status":"ok","model_ready":true} at 14:27:52Z -> about 14 s (polled every 5 s).   PASS
+  $ ... ps -a  -> db healthy, migrate Exited (0), api healthy                         PASS
+
+Step 4. Admin (non-TTY path from README)
+  $ export AINIS_NEW_ADMIN_PASSWORD="$(cat local-data/cleanclone_admin.pw)"   # 23 chars, from openssl rand
+  $ docker compose -p ainis_fresh ... exec -T -e AINIS_NEW_ADMIN_PASSWORD api python scripts/create_admin.py --username admin
+    Database: postgresql+psycopg://news:***@db:5432/news
+    Admin 'admin' created
+    exit 0                                                                            PASS
+  $ unset AINIS_NEW_ADMIN_PASSWORD
+  The variable reached the container: proven by the login in 6b with that password.
+  It is not persisted in the api container's environment (checked: empty in a new exec).
+  Interactive getpass path (no env var, password typed twice): CHUA KIEM / NOT TESTED
+  (needs a real person at a TTY).
+
+Step 5. Seed
+  $ docker compose -p ainis_fresh ... exec -T api python scripts/seed_demo.py
+    Step 1/3: + MIT Research, + BBC Technology, + TechCrunch AI, + The Verge AI (added)
+    Step 2/3: BBC 21 new, MIT 50 new, TechCrunch 20 new, Verge 10 new
+              101 new article(s) from 4 of 4 source(s)
+    Step 3/3: Done: 101 article(s) updated, 2 topic(s) created
+    Totals: 4 source(s), 101 article(s), 101 AI-processed
+    exit 0, 52 s                                                                      PASS
+  Sources ok/failed: 4/0. Topics created: 2 (the 2026-11-08 evidence had 7 on a different
+  day's feed content; only 2 topics this time, see Observations).
+  $ docker stats --no-stream (once, after seed)
+    ainis_fresh-api-1  2.069GiB / 7.619GiB  CPU 0.23%
+    ainis_fresh-db-1   39.04MiB / 7.619GiB  CPU 0.05%
+
+Step 6. Checks with curl against http://127.0.0.1:8012 (cookie jar in local-data/, deleted at the end)
+  6a GET /api/v1/health -> 200 {"status":"ok","model_ready":true}                    PASS
+  6b POST /api/v1/auth/login (X-Requested-With: ainis, JSON, body from file) -> 200
+     GET /api/v1/auth/me -> 200 {"id":1,"username":"admin","role":"admin"}
+     wrong password -> 401 {"detail":"Invalid username or password"}                  PASS
+  6c GET /api/v1/sources -> 4: BBC Technology, MIT Research, TechCrunch AI, The Verge AI   PASS
+  6d GET /api/v1/topics/trending?window_hours=24  -> 2 topics                          PASS
+       "lab · scientists · molecules · researchers"                    19 articles, score 7.22
+       "chinese spy · spy china · huang investigated · investigation huang" 5 articles, score 3.04
+     window_hours=168 -> 2 topics (same two; 41 and 11 articles)
+     => Trending HAS data in the 24 h window right after the seed.
+  6e POST /api/v1/ai/search (anonymous), top 3 (similarity | source | title):
+     "OpenAI valuation" (5 results)
+       0.438 | TechCrunch AI | Anthropic sets IPO price range of $70 to $78 per share to reach an implied valuation of $1.404 trillion
+       0.327 | TechCrunch AI | OpenAI rolls out new business profiles, making ChatGPT just a little bit more like Google
+       0.370 | BBC Technology | Australia considers criminal penalties for rogue AI in wake of OpenAI hack
+     "cancer cells treatment" (5 results)
+       0.521 | MIT Research | Reprogrammed NK immune cells target cancer and autoimmune disorders
+       0.465 | MIT Research | Biologists identify a cellular pathway that allows colorectal cancer to metastasize
+       0.484 | MIT Research | Lung cancers can use two different mechanisms to evade KRAS-inhibiting drugs
+     Both return relevant articles.                                                    PASS
+     (Order is not strictly by similarity: 0.327 ranks above 0.370 and 0.465 above 0.484.)
+  6f GET / -> 200, GET /admin/ -> 200; both send:                                     PASS
+       content-security-policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'
+       x-frame-options: DENY
+       x-content-type-options: nosniff
+       referrer-policy: no-referrer
+  6g Signed in: GET /api/v1/ai/topics -> 200 (2 topics); GET /api/v1/sources -> 200
+     (both endpoints are also public reads.)
+     Admin endpoints without a session:
+       GET  /api/v1/ai/process/nonexistent -> 401 {"detail":"Not signed in."}
+       POST /api/v1/ingestion/run          -> 401 {"detail":"Not signed in."}
+       POST /api/v1/sources                -> 401 {"detail":"Not signed in."}
+     Same GET as admin -> 404 "AI job not found." (auth passed)                        PASS
+     No 503 seen.
+  6h $ docker compose -p ainis_fresh ... exec -T api python scripts/seed_demo.py --refresh
+       Step 1/3 skipped (sources exist); 0 new from 4 of 4 sources (all already stored);
+       AI step skipped ("needs at least 10" new articles; existing topics kept)
+       Totals: 4 source(s), 101 article(s), 101 AI-processed; exit 0; 3 s
+     GET /api/v1/sources -> still 4 (no duplicates)                                    PASS
+  6i $ docker compose -p ainis_fresh ... ps -a
+       api      Up (healthy)     127.0.0.1:8012->8000/tcp
+       db       Up (healthy)     5432/tcp   (container port only)
+       migrate  Exited (0)
+     docker port ainis_fresh-db-1 -> empty; HostConfig.PortBindings of db = {}
+     => DB not published on the host.                                                 PASS
+
+Step 7. Cold restart
+  $ docker compose -p ainis_fresh ... restart api   -> command 2 s
+  restart command start -> model_ready:true: 11 s (polled every 2 s)                  PASS
+  Old session cookie after restart: GET /api/v1/auth/me -> 200 role admin
+  (session survives the restart)                                                      PASS
+
+------------------------------------------------------------------
+Timing summary
+  | Step                                   | Time                       |
+  |----------------------------------------|----------------------------|
+  | build + up (up -d --build)             | 1031 s (17 min 11 s)       |
+  |   of which pip install                 | 754 s                      |
+  |   of which model download              | 77 s                       |
+  |   of which image export                | 187 s                      |
+  | api start -> model_ready:true          | ~14 s                      |
+  | seed_demo.py (first)                   | 52 s                       |
+  | seed_demo.py --refresh                 | 3 s                        |
+  | restart api -> model_ready:true        | 11 s                       |
+  Image size: 11.1 GB (disk) / 3.83 GB (content). api RAM after seed: 2.07 GiB.
+
+Pass/fail
+  | Check                                         | Result |
+  |-----------------------------------------------|--------|
+  | 1  clone = HEAD, no local-data/backups         | PASS (see D4) |
+  | 3  build, migrate exit 0, api healthy          | PASS   |
+  | 3  model_ready:true                            | PASS   |
+  | 4  create_admin (non-TTY)                      | PASS   |
+  | 4  create_admin (interactive getpass)          | NOT TESTED |
+  | 5  seed_demo                                   | PASS   |
+  | 6a health                                      | PASS   |
+  | 6b login / me / wrong password                 | PASS   |
+  | 6c sources                                     | PASS   |
+  | 6d trending 24 h has data                      | PASS (2 topics) |
+  | 6e search                                      | PASS   |
+  | 6f pages + security headers                    | PASS   |
+  | 6g admin auth (401, not 503)                   | PASS   |
+  | 6h --refresh, no duplicates                    | PASS   |
+  | 6i ps, DB not published                        | PASS   |
+  | 7  cold restart, session kept                  | PASS   |
+
+Observations (not failures of the README steps)
+  - AI processing created only 2 topics for 101 articles of 4 feeds; one of them
+    ("lab · scientists · molecules · researchers", 41 articles in 7 days) is very broad.
+  - Search result order is not strictly by similarity (see 6e); presumably a deliberate
+    re-ranking, not checked here.
+  - README section B ends with "Not yet run in Docker: create_admin.py and seed_demo.py
+    inside the container, and these five steps end to end"; this run covers that
+    (except the interactive getpass prompt and opening the UI in a browser).
+
+NOT TESTED (CHUA KIEM)
+  - Interactive getpass password entry for create_admin.py (needs a real TTY / person).
+  - Build on a machine with an empty Docker cache (python:3.12-slim pull time).
+  - The UI in a real browser (log in on /admin/, trending fallback text); only HTTP status
+    and headers were checked.
+  - Exact README commands without -p / override (port 8001 is in use by another stack).
+  - `docker compose down` (without -v) keeping data; only `down -v` was run (cleanup).
+  - POST /ai/ask (needs an LLM; optional per README).
+
+Step 9. Cleanup
+  $ docker compose -p ainis_fresh -f compose.yaml -f <override> down -v
+  Result and container comparison: see the final section below.
+  down -v: exit 0; containers ainis_fresh-{api,db,migrate}-1, volume
+  ainis_fresh_postgres_data and network ainis_fresh_default removed;
+  `docker compose -p ainis_fresh ps -a` empty.                                       PASS
+  `docker ps --format '{{.Names}}'` before vs after: IDENTICAL (7 containers:
+  ainis-main-db-1, ainis_dockertest-api-1, ainis_dockertest-db-1, ainis_e2e-api-1,
+  ainis_e2e-db-1, ainis_main-api-1, ainis_main-db-1) -> ainis_main untouched.         PASS
+  Cookie jar and the generated admin password file in local-data/ deleted.
+  Image ai-news-intelligence:fresh kept (no image removal in this task).
+  Clone directory kept for the author to delete: ../ainis_cleanclone_3582c85
+  (contains a .env with the random POSTGRES_PASSWORD; the database is already deleted).

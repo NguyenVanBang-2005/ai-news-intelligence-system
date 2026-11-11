@@ -67,3 +67,27 @@ export function externalLink(url, children, props = {}) {
   link.setAttribute("href", href);
   return link;
 }
+
+const SVG_NS = "http://www.w3.org/2000/svg"; // XML namespace name, not a download
+
+/**
+ * A decorative icon that points at a <symbol id="icon-..."> written in the page's HTML
+ * (see the hidden sprite in index.html and admin/index.html). Hidden from screen readers.
+ */
+export function svgIcon(symbolId, className = "icon") {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#${symbolId}`);
+  svg.append(use);
+  return svg;
+}
+
+/** Disables a button while a request runs; aria-busy shows the CSS spinner. */
+export function setButtonBusy(button, busy) {
+  button.disabled = busy;
+  if (busy) button.setAttribute("aria-busy", "true");
+  else button.removeAttribute("aria-busy");
+}

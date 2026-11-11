@@ -61,6 +61,16 @@ def fresh_search_rate_limit() -> Generator[None, None, None]:
     search_rate_limiter.reset()
 
 
+@pytest.fixture(autouse=True)
+def fresh_login_ip_limit() -> Generator[None, None, None]:
+    """Every TestClient logs in from the same address; no test may inherit another's tries."""
+    from app.api.auth_deps import login_ip_limiter
+
+    login_ip_limiter.reset()
+    yield
+    login_ip_limiter.reset()
+
+
 @pytest.fixture
 def new_postgres_db() -> Generator[Callable[[], str], None, None]:
     """Factory for empty, uniquely named PostgreSQL databases that are dropped afterwards."""

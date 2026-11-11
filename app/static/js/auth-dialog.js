@@ -2,7 +2,7 @@
 // focus stays inside, Esc or a backdrop click closes it, focus returns to the opener.
 
 import { authErrorText, logIn, register } from "./auth.js";
-import { el } from "./dom.js";
+import { el, setButtonBusy } from "./dom.js";
 import { keepFocusInside } from "./focus-trap.js";
 
 const BODY_LOCK_CLASS = "dialog-open";
@@ -118,7 +118,7 @@ async function submit({ mode, view, close, opener, onSignedIn }) {
 }
 
 function setBusy(view, busy) {
-  view.submitButton.disabled = busy;
+  setButtonBusy(view.submitButton, busy);
   view.submitButton.textContent = busy ? view.config.busy : view.config.submit;
 }
 

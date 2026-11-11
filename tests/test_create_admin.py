@@ -1,4 +1,4 @@
-"""scripts/create_admin.py on SQLite: create, promote, validation, output, then login."""
+"""scripts/create_admin.py on SQLite: create, reset, promote, validation, output, login."""
 
 import importlib.util
 import subprocess
@@ -7,15 +7,15 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 from app.db.session import Base
-from app.models.user import User
-from app.services.auth import create_or_promote_admin, register_user
+from app.models.user import User, UserSession
+from app.services.auth import create_or_promote_admin, create_session, register_user
 from tests.db_isolation import isolated_env
 from tests.pg_support import client_for
 
@@ -70,25 +70,93 @@ def test_creates_a_new_admin(factory, sqlite_engine) -> None:
     assert user is not None and user.role == "admin" and user.is_active
 
 
-def test_promotes_an_existing_user_without_touching_the_password(factory, sqlite_engine):
+def session_count(engine: Engine) -> int:
+    with Session(engine) as db:
+        return db.scalar(select(func.count()).select_from(UserSession))
+
+
+def test_promote_makes_an_existing_user_an_active_admin_without_touching_the_password(
+    factory, sqlite_engine
+) -> None:
     with factory() as db:
         register_user(db, "carol", PASSWORD)
         db.execute(User.__table__.update().values(is_active=False))
         db.commit()
     before = get_user(sqlite_engine, "carol").password_hash
     with factory() as db:
-        assert create_or_promote_admin(db, "carol", no_password_needed) == "promoted"
+        assert create_or_promote_admin(db, "carol", no_password_needed, promote=True) == "promoted"
     after = get_user(sqlite_engine, "carol")
     assert (after.role, after.is_active, after.password_hash) == ("admin", True, before)
 
 
-def test_reset_password_replaces_the_hash(factory, sqlite_engine) -> None:
+def test_reset_password_keeps_a_plain_user_a_plain_user(factory, sqlite_engine) -> None:
     with factory() as db:
         register_user(db, "carol", PASSWORD)
+        db.execute(User.__table__.update().values(is_active=False))
+        db.commit()
     before = get_user(sqlite_engine, "carol").password_hash
     with factory() as db:
+        outcome = create_or_promote_admin(
+            db, "carol", lambda: OTHER_PASSWORD, reset_password=True
+        )
+    after = get_user(sqlite_engine, "carol")
+    assert outcome == "password reset"
+    assert after.password_hash != before
+    assert (after.role, after.is_active) == ("user", False)
+
+
+def test_reset_password_ends_every_session_of_the_account(factory, sqlite_engine) -> None:
+    with factory() as db:
+        carol = register_user(db, "carol", PASSWORD)
+        dave = register_user(db, "dave", PASSWORD)
+        create_session(db, carol)
+        create_session(db, carol)
+        create_session(db, dave)
+    with factory() as db:
         create_or_promote_admin(db, "carol", lambda: OTHER_PASSWORD, reset_password=True)
-    assert get_user(sqlite_engine, "carol").password_hash != before
+    with Session(sqlite_engine) as db:
+        owners = list(db.scalars(select(UserSession.user_id)))
+    assert owners == [dave.id]  # only the other account keeps its session
+
+
+def test_promote_without_reset_keeps_the_sessions(factory, sqlite_engine) -> None:
+    with factory() as db:
+        create_session(db, register_user(db, "carol", PASSWORD))
+    with factory() as db:
+        create_or_promote_admin(db, "carol", no_password_needed, promote=True)
+    assert session_count(sqlite_engine) == 1
+
+
+def test_promote_and_reset_together(factory, sqlite_engine) -> None:
+    with factory() as db:
+        register_user(db, "carol", PASSWORD)
+    with factory() as db:
+        outcome = create_or_promote_admin(
+            db, "carol", lambda: OTHER_PASSWORD, reset_password=True, promote=True
+        )
+    assert outcome == "promoted, password reset"
+    assert get_user(sqlite_engine, "carol").role == "admin"
+
+
+def test_existing_account_without_a_flag_changes_nothing(factory, sqlite_engine) -> None:
+    with factory() as db:
+        register_user(db, "carol", PASSWORD)
+    before = get_user(sqlite_engine, "carol")
+    with factory() as db, pytest.raises(ValueError, match="--promote"):
+        create_or_promote_admin(db, "carol", no_password_needed)
+    after = get_user(sqlite_engine, "carol")
+    assert (after.role, after.password_hash) == ("user", before.password_hash)
+
+
+def test_rejected_new_password_changes_nothing(factory, sqlite_engine) -> None:
+    with factory() as db:
+        create_session(db, register_user(db, "carol", PASSWORD))
+    before = get_user(sqlite_engine, "carol").password_hash
+    with factory() as db, pytest.raises(ValueError):
+        create_or_promote_admin(db, "carol", lambda: "short", reset_password=True, promote=True)
+    after = get_user(sqlite_engine, "carol")
+    assert (after.role, after.password_hash) == ("user", before)
+    assert session_count(sqlite_engine) == 1
 
 
 @pytest.mark.parametrize(
@@ -106,7 +174,7 @@ def test_cli_output_has_no_secret(factory, sqlite_engine, monkeypatch, capsys) -
     monkeypatch.setenv(create_admin.PASSWORD_ENV_VAR, PASSWORD)
     assert create_admin.main(["--username", "Boss"], session_factory=factory) == 0
     output = capsys.readouterr()
-    assert output.out.strip() == "Admin 'boss' created"
+    assert output.out.splitlines() == ["Database: sqlite://", "Admin 'boss' created"]
     stored_hash = get_user(sqlite_engine, "boss").password_hash
     for secret in (PASSWORD, stored_hash):
         assert secret not in output.out + output.err
@@ -118,6 +186,40 @@ def test_cli_reports_invalid_password(factory, monkeypatch, capsys) -> None:
     output = capsys.readouterr()
     assert output.err.startswith("Error: password must be 10-128 characters")
     assert "tiny-pass" not in output.out + output.err
+
+
+def test_cli_shows_the_database_without_its_password(monkeypatch, capsys) -> None:
+    engine = create_engine("postgresql+psycopg://u:SECRET@h/db")  # never connects
+    monkeypatch.setattr(create_admin, "create_or_promote_admin", lambda *a, **k: "created")
+    try:
+        factory = sessionmaker(bind=engine)
+        assert create_admin.main(["--username", "boss"], session_factory=factory) == 0
+    finally:
+        engine.dispose()
+    output = capsys.readouterr()
+    assert output.out.splitlines()[0] == "Database: postgresql+psycopg://u:***@h/db"
+    assert "SECRET" not in output.out + output.err
+
+
+def test_cli_promote_and_reset_flags(factory, sqlite_engine, monkeypatch, capsys) -> None:
+    with factory() as db:
+        register_user(db, "carol", PASSWORD)
+    monkeypatch.setenv(create_admin.PASSWORD_ENV_VAR, OTHER_PASSWORD)
+    reset = ["--username", "carol", "--reset-password"]
+    assert create_admin.main(reset, session_factory=factory) == 0
+    assert get_user(sqlite_engine, "carol").role == "user"
+    assert create_admin.main(["--username", "carol", "--promote"], session_factory=factory) == 0
+    assert get_user(sqlite_engine, "carol").role == "admin"
+    out = capsys.readouterr().out.splitlines()
+    assert out[1] == "Account 'carol': password reset"
+    assert out[3] == "Account 'carol': promoted"
+
+
+def test_cli_existing_account_without_a_flag_is_an_error(factory, capsys) -> None:
+    with factory() as db:
+        register_user(db, "carol", PASSWORD)
+    assert create_admin.main(["--username", "carol"], session_factory=factory) == 1
+    assert "--promote" in capsys.readouterr().err
 
 
 def test_cli_rejects_a_password_argument(factory) -> None:
@@ -146,4 +248,5 @@ def test_script_help_runs_from_the_repo_root_without_pythonpath(tmp_path: Path) 
     )
     assert result.returncode == 0, result.stderr
     assert "--username" in result.stdout and "--reset-password" in result.stdout
+    assert "--promote" in result.stdout
     assert not (tmp_path / "unused.db").exists()  # --help never opens the database

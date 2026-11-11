@@ -73,8 +73,12 @@ def test_unconfigured_token_fails_closed(
 ) -> None:
     monkeypatch.setattr(settings, "admin_api_token", configured)
     # Even an empty header (which would equal an empty configured token) is refused.
-    for token in (None, "", TEST_ADMIN_TOKEN):
+    for token in ("", TEST_ADMIN_TOKEN):
         assert call(anonymous, method, path, kwargs, token).status_code == 503
+    # No header and no session: the caller is simply not signed in.
+    response = call(anonymous, method, path, kwargs)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not signed in."}
 
 
 @pytest.mark.parametrize("path", PUBLIC)

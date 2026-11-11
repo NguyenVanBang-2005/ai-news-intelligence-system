@@ -57,6 +57,16 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=PASSWORD_MAX_CHARS)
 
 
+class ChangePasswordRequest(BaseModel):
+    """new_password follows the registration rules; the route also checks it against the
+    username and the current password (422)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(min_length=1, max_length=PASSWORD_MAX_CHARS)
+    new_password: str = Field(min_length=PASSWORD_MIN_CHARS, max_length=PASSWORD_MAX_CHARS)
+
+
 class UserRead(BaseModel):
     """Public account fields; the password hash is never part of a response."""
 

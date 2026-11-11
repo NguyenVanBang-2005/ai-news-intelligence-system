@@ -1,11 +1,12 @@
 // The right side of the top bar: "Log in" / "Register" when signed out; the username,
-// role, an "Admin" link (admins only) and "Log out" when signed in.
+// role, an "Admin" link (admins only), "Change password" and "Log out" when signed in.
 // The state comes from GET /api/v1/auth/me when the page loads (401 = signed out).
 
 import { badge } from "./components.js";
 import { authErrorText, fetchCurrentUser, logOut } from "./auth.js";
 import { openAuthDialog } from "./auth-dialog.js";
-import { el } from "./dom.js";
+import { el, setButtonBusy } from "./dom.js";
+import { changePasswordControls } from "./password-dialog.js";
 
 const ADMIN_PATH = "/admin/";
 
@@ -40,18 +41,19 @@ function signedIn(root, user) {
     el("span", { className: "account-name", text: user.username }),
     badge(user.role, user.role === "admin" ? "primary" : "neutral"),
     user.role === "admin" ? el("a", { className: "nav-link", href: ADMIN_PATH, text: "Admin" }) : null,
+    ...changePasswordControls(),
     logOutButton,
     message,
   ].filter(Boolean);
 }
 
 async function endSession(root, button, message) {
-  button.disabled = true;
+  setButtonBusy(button, true);
   try {
     await logOut();
     showUser(root, null);
   } catch (error) {
     message.textContent = authErrorText(error);
-    button.disabled = false;
+    setButtonBusy(button, false);
   }
 }

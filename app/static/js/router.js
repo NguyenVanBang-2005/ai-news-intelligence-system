@@ -1,6 +1,11 @@
 // Hash router: "#/search", "#/topics", "#/sources". Pages live in the URL hash, not on the server.
 
 const SITE_NAME = "AINIS";
+// The old page fades out for this long before the new one is drawn (--duration-fast).
+const LEAVE_MS = 120;
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+let renderCount = 0; // only the latest hash change gets drawn
 
 /**
  * Shows the page of the current hash in `root` and follows hash changes.
@@ -12,13 +17,25 @@ export function startRouter({ root, routes, defaultRoute }) {
   show();
 }
 
+// Short cross-fade: the CSS class "route-leaving" fades the old page out, then the new
+// page is rendered and rises in (style.css, ".app > *"). No delay on first load or when
+// the user asked for reduced motion.
 function showRoute({ root, routes, defaultRoute }) {
   const name = routeName(window.location.hash, routes, defaultRoute);
   const route = routes[name];
   document.title = `${route.title} · ${SITE_NAME}`;
   markActiveNav(name);
-  root.replaceChildren();
-  route.render(root);
+  const current = ++renderCount;
+  const draw = () => {
+    if (current !== renderCount) return; // a newer hash change came in meanwhile
+    root.classList.remove("route-leaving");
+    root.replaceChildren();
+    route.render(root);
+  };
+  const reduced = window.matchMedia?.(REDUCED_MOTION).matches;
+  if (current === 1 || reduced) return draw(); // first page: nothing to fade out
+  root.classList.add("route-leaving");
+  setTimeout(draw, LEAVE_MS);
 }
 
 /** The route named by a hash like "#/topics", or the default one. */

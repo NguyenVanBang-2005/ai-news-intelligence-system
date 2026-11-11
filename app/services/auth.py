@@ -21,6 +21,7 @@ from app.services.passwords import hash_password, verify_dummy, verify_password
 __all__ = [
     "UsernameTakenError",
     "authenticate",
+    "change_password",
     "create_or_promote_admin",
     "create_session",
     "hash_token",
@@ -81,6 +82,16 @@ def resolve_session(db: Session, token: str) -> User | None:
     return user
 
 
+def change_password(db: Session, user: User, new_password: str, current_token: str) -> None:
+    """Store a new scrypt hash and end every other session of the user.
+
+    The caller has already checked the current password and the new one's rules; the
+    session behind `current_token` stays valid.
+    """
+    UserRepository(db).set_password_hash(user, hash_password(new_password))
+    UserSessionRepository(db).delete_for_user_except(user.id, hash_token(current_token))
+
+
 def revoke_session(db: Session, token: str) -> None:
     """End the session for this token; unknown tokens are ignored."""
     UserSessionRepository(db).delete_by_token_hash(hash_token(token))
@@ -92,8 +103,16 @@ def create_or_promote_admin(
     read_password: Callable[[], str],
     *,
     reset_password: bool = False,
+    promote: bool = False,
 ) -> str:
-    """Make `username` an active admin; returns "created" or "promoted".
+    """Create `username` as an active admin, or change an existing account; returns what
+    was done: "created", "password reset", "promoted" or "promoted, password reset".
+
+    For an existing account:
+    - reset_password: new hash and every session of the account ended; role and
+      is_active stay as they are.
+    - promote: role "admin" and is_active=True; the password stays unless reset_password.
+    - neither: ValueError, nothing changes.
 
     read_password is called only when a password is needed (new account or reset_password).
     Raises ValueError when the username or password breaks the registration rules.
@@ -105,8 +124,20 @@ def create_or_promote_admin(
         password = validate_password(read_password(), username)
         users.create(username=username, password_hash=hash_password(password), role=ROLE_ADMIN)
         return "created"
+    if not (reset_password or promote):
+        raise ValueError(
+            f"account '{username}' already exists; add --promote and/or --reset-password"
+        )
+    # Validated before anything is written, so a rejected password changes nothing.
     new_hash = None
     if reset_password:
         new_hash = hash_password(validate_password(read_password(), username))
-    users.grant_role_and_activate(user, role=ROLE_ADMIN, password_hash=new_hash)
-    return "promoted"
+    done = []
+    if promote:
+        users.grant_role_and_activate(user, role=ROLE_ADMIN)
+        done.append("promoted")
+    if new_hash is not None:
+        users.set_password_hash(user, new_hash)
+        UserSessionRepository(db).delete_for_user(user.id)
+        done.append("password reset")
+    return ", ".join(done)

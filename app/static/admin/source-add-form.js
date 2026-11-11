@@ -1,6 +1,7 @@
 // "Add an RSS/Atom source": POST /api/v1/sources with type "rss".
 
-import { el } from "../js/dom.js";
+import { el, setButtonBusy } from "../js/dom.js";
+import { showToast } from "../js/toast.js";
 import { LANGUAGES } from "../js/pages/source-status.js";
 import { adminErrorText, adminRequest, messageBanner } from "./admin-api.js";
 
@@ -50,7 +51,7 @@ function field(label, input) {
 // The server checks the values; its `detail` is shown word for word on 409/422.
 async function submit(view, onAdded) {
   if (view.button.disabled) return; // one request at a time
-  view.button.disabled = true;
+  setButtonBusy(view.button, true);
   try {
     const source = await adminRequest("/api/v1/sources", {
       method: "POST",
@@ -58,11 +59,12 @@ async function submit(view, onAdded) {
     });
     view.name.value = "";
     view.url.value = "";
-    view.message.replaceChildren(messageBanner(`Source added: ${source.name}`, "info"));
+    view.message.replaceChildren();
+    showToast(`Source added: ${source.name}`, "success");
     onAdded(source);
   } catch (error) {
     view.message.replaceChildren(messageBanner(`The source was not added. ${adminErrorText(error)}`, "error"));
   } finally {
-    view.button.disabled = false;
+    setButtonBusy(view.button, false);
   }
 }
