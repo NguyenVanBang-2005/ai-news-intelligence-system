@@ -28,8 +28,8 @@ services:
       TZ: UTC
       PGTZ: UTC
     command: ["postgres", "-c", "timezone=UTC"]
-    # No host port here: the API is the only way in. compose.override.yaml publishes
-    # the DB on localhost for local development.
+    # No host port here: the API is the only way in. compose.dev.yaml (opt-in with
+    # `-f compose.yaml -f compose.dev.yaml`) publishes the DB on localhost for development.
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ${BACKUP_DIR:-./backups}:/backups

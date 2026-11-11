@@ -19,7 +19,10 @@ A backend and web UI that collects AI news and organises it:
 not separate services. There is one entry point (`app.main:app`); the UI is served by the
 same process.
 
-## Quick start A: run on the host with the evaluation snapshot (recommended for a demo)
+**Docker Compose ([Quick start B](#quick-start-b-docker-compose-main-path)) is the main way to run
+the system; running on the host with SQLite (Quick start A) is the development path.**
+
+## Quick start A (development): run on the host with the evaluation snapshot
 
 The snapshot `local-data/ainis_eval_v2.db` (SQLite, 200 articles, topics already computed)
 is **not in the repository** (`local-data/` is gitignored); the team sends it separately.
@@ -98,35 +101,74 @@ Notes:
   [Accounts and roles](#accounts-and-roles)). `ADMIN_API_TOKEN` is optional: it is only
   needed to call admin endpoints from scripts or curl (`X-Admin-Token`).
 
-## Quick start B: Docker Compose (PostgreSQL 17 + migrations + API)
+## Quick start B: Docker Compose (main path)
+
+Needs Docker with Compose v2. From the repository root:
 
 ```bash
-cp .env.example .env      # then set POSTGRES_PASSWORD (ADMIN_API_TOKEN only for scripts/curl)
-docker compose up -d --build
+cp .env.example .env                    # 1. then set the values below
+docker compose up -d --build            # 2. db -> migrate -> api
+docker compose exec api python scripts/create_admin.py --username admin   # 3.
+docker compose exec api python scripts/seed_demo.py                       # 4.
 ```
 
-- API and UI on <http://127.0.0.1:8001/> (`API_PORT`, default 8001). The DB is published on
-  `127.0.0.1:${POSTGRES_PORT}` only through `compose.override.yaml` (local development).
-- The image installs `requirements.txt`, so it **has the ML libraries**. The embedding model
-  is **downloaded into the image at build time** (`docker compose up --build` needs Internet),
-  in its own layer after `pip install` and before the app code is copied, into
-  `HF_HOME=/opt/hf-cache`. The Dockerfile build argument `EMBEDDING_MODEL_NAME` picks the model
-  (default: the same as the code). `compose.yaml` sets `HF_HUB_OFFLINE=1` unless you override
-  it, so the running API never downloads a model.
-- Create the first admin account (see [Accounts and roles](#accounts-and-roles)):
-  `docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>`
-  (the container name depends on your Compose project name; see `docker compose ps`).
+5. Open <http://127.0.0.1:8001/> (Search, Topics, trending) and log in as `admin` for `/admin/`.
+
+`.env` values to set before step 2:
+
+| Variable | Why |
+|---|---|
+| `POSTGRES_PASSWORD` | Database password. The `.env.example` value `news` is a placeholder: the stack starts with it, but set your own. Set it **before the first start**: the database keeps the password it was created with, so changing it later makes `migrate` and `api` fail to connect (see [docs/database.md](docs/database.md)) |
+
+Nothing else is required. Optional: `API_PORT` if 8001 is taken; `NEWS_API_KEY` only for
+`news_api` sources (the demo uses RSS); `LLM_*` only for `POST /ai/ask` (inside the container
+`localhost` is the container itself, so a host Ollama is not reached at the default URL).
+
+Step by step:
+
+- **Step 2, first build needs Internet** (Python packages and the embedding model, which is
+  baked into the image under `HF_HOME=/opt/hf-cache`; the running API sets `HF_HUB_OFFLINE=1`
+  and never downloads a model). Measured on the dev machine: about 20 minutes and a 10.2 GB
+  image ([compose_fresh_start.txt](docs/evidence/compose_fresh_start.txt), 2026-10-24); about
+  32 minutes and 11.1 GB, of which the model cache is 458 MB
+  ([fresh_stack_startup_cleanup_abd974a.txt](docs/evidence/fresh_stack_startup_cleanup_abd974a.txt),
+  2026-11-08). Check with `docker compose ps`: `migrate` exited (0), `api` healthy.
+- **Step 3** uses the service name `api`, so it works whatever the Compose project (folder)
+  name is. The script asks for the password twice without showing it; nothing is stored
+  in code, migrations or compose files. Without a terminal (CI, or Git Bash printing
+  "the input device is not a TTY"), pass it through `AINIS_NEW_ADMIN_PASSWORD` instead:
+
+  ```bash
+  read -rs -p "Admin password: " AINIS_NEW_ADMIN_PASSWORD; echo; export AINIS_NEW_ADMIN_PASSWORD
+  docker compose exec -T -e AINIS_NEW_ADMIN_PASSWORD api python scripts/create_admin.py --username admin
+  unset AINIS_NEW_ADMIN_PASSWORD
+  ```
+
+- **Step 4** (`scripts/seed_demo.py`, needs Internet, no API key, no admin login) adds four
+  public RSS feeds, ingests them and runs AI processing (topics, embeddings) inside the
+  container. Running it again adds nothing twice. One failing feed is reported and skipped;
+  if every feed fails it exits with code 2 (most likely no Internet access).
+- **Trending** counts articles of the last 24 hours. Just before a presentation, fetch
+  fresh articles: `docker compose exec api python scripts/seed_demo.py --refresh`. If the
+  last 24 hours still have no trending topic, the UI asks for the last 7 days instead and
+  says so ("No trending topics in the last 24 hours. Showing the last 7 days.").
+- `docker compose down` keeps the data; **`docker compose down -v` deletes the database**
+  (articles, topics and the admin account). The model stays in the image.
+- The database has no host port. For host-side Python (tests, alembic) publish it on
+  `127.0.0.1:${POSTGRES_PORT}` with the development file:
+  `docker compose -f compose.yaml -f compose.dev.yaml up -d`.
 - The Compose API uses the session cookie `ainis_session_docker` (`SESSION_COOKIE_NAME` in
   `compose.yaml`), the host run `ainis_session`: browsers share cookies across the ports
   of one host, so with two names a Docker and a host server can run side by side without
   overwriting each other's sign-in.
-- A fresh stack has an **empty database**: no articles and no topics until you add sources,
-  run ingestion (`POST /api/v1/ingestion/run`) and then `POST /api/v1/ai/process`.
 - Database setup, backup and restore: [docs/database.md](docs/database.md).
-- Last verified on 2026-10-27 at commit `229f9d0`
-  ([postgres_backup_restore.txt](docs/evidence/postgres_backup_restore.txt): start, restart,
-  backup, restore); fresh start also in [compose_fresh_start.txt](docs/evidence/compose_fresh_start.txt)
-  (2026-10-24). **Not re-verified at the current main.**
+- Evidence: start, restart, backup and restore on 2026-10-27 at commit `229f9d0`
+  ([postgres_backup_restore.txt](docs/evidence/postgres_backup_restore.txt)); baked model,
+  API healthcheck, ingestion of the same four feeds (101 articles) and AI processing
+  (23.5 s, 7 topics) on 2026-11-08
+  ([fresh_stack_startup_cleanup_abd974a.txt](docs/evidence/fresh_stack_startup_cleanup_abd974a.txt)).
+  **Not yet run in Docker:** `create_admin.py` and `seed_demo.py` inside the container, and
+  these five steps end to end.
 
 ## Configuration
 
@@ -207,7 +249,7 @@ UI-to-API details: [docs/ui-api-mapping.md](docs/ui-api-mapping.md).
   python scripts/create_admin.py --username <name>                               # host
   python scripts/create_admin.py --username <name> --reset-password              # forgotten password
   python scripts/create_admin.py --username <name> --promote                     # existing account -> admin
-  docker exec -it ainis_main-api-1 python scripts/create_admin.py --username <name>  # Docker
+  docker compose exec api python scripts/create_admin.py --username <name>          # Docker (service name)
   ```
 
 - `POST /auth/change-password` (session cookie, `X-Requested-With: ainis`) takes
@@ -294,8 +336,9 @@ PostgreSQL tests.
 - Model loading takes time at startup (about 30 seconds on the dev machine).
 - Two RSS sources (VentureBeat, AI News) block bots.
 - The corpus is a one-day snapshot; ingesting again will not reproduce it. Its articles
-  are older than the 24-hour trending window, so on the snapshot the trending chips are
-  hidden and the Topics chart says no topic is trending.
+  are older than the 24-hour trending window. The UI then asks for the last 7 days (the
+  widest window the API accepts) and says so; when that is empty too (as on the snapshot
+  today), the trending chips are hidden and the sidebar and Topics chart say no topic is trending.
 - PostgreSQL is checked only by CI and by the backup/restore run of 2026-10-27.
 
 ## Reading the code

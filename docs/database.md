@@ -30,7 +30,8 @@ trong `.env` không đổi password của role trong volume đã tồn tại.
 
 Compose chờ DB healthy, chạy `alembic upgrade head` trong service `migrate`, rồi
 mới chạy API. Migrate kết thúc với mã 0 là bình thường. API tại
-<http://localhost:8001/docs>. Cổng API và DB chỉ bind loopback của máy host.
+<http://localhost:8001/docs>. Cổng API chỉ bind loopback của máy host; DB không có cổng trên host trừ khi thêm
+`-f compose.dev.yaml` (cũng chỉ bind loopback).
 Khi cập nhật schema ở các lần triển khai tiếp theo:
 
 ```powershell
@@ -59,8 +60,10 @@ thành đường dẫn Windows và làm lệnh lỗi (đặt `MSYS_NO_PATHCONV=1
 
 ## Chạy Python trên host
 
+DB chỉ có cổng trên host khi thêm `compose.dev.yaml` (file này không tự được nạp):
+
 ```powershell
-docker compose up -d db
+docker compose -f compose.yaml -f compose.dev.yaml up -d db
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload

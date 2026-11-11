@@ -3,19 +3,21 @@
 import { loading, progressBar } from "../components.js";
 import { el } from "../dom.js";
 import { formatCount, formatScore } from "../format.js";
-import { TRENDING_PARAMS } from "../trending.js";
+import { fallbackNotice, NO_TRENDING_TEXT, TRENDING_PARAMS, windowLabel, windowPhrase } from "../trending.js";
 
 const MAX_CHIPS = 4;
 const UNAVAILABLE = "Trending is unavailable right now.";
-const EMPTY = "No trending topics yet. Topics appear once enough articles are collected.";
 
 /** The "Trending:" chip row; it stays hidden unless there are topics. */
 export function trendingChips(trendingPromise, onPick) {
   const row = el("div", { className: "trending-chips", hidden: true });
-  trendingPromise.then((topics) => {
+  trendingPromise.then(({ topics, windowHours }) => {
     const top = strongestFirst(topics).slice(0, MAX_CHIPS);
     if (top.length === 0) return;
-    row.append(el("span", { className: "trending-chips-label", text: "Trending:" }),
+    // Says which window the chips come from when it is not the usual one.
+    const label = windowHours === TRENDING_PARAMS.window_hours
+      ? "Trending:" : `Trending (last ${windowPhrase(windowHours)}):`;
+    row.append(el("span", { className: "trending-chips-label", text: label }),
       ...top.map((item) => el("button", {
         className: "chip", type: "button", text: item.topic, onclick: () => onPick(item.topic),
       })));
@@ -27,22 +29,34 @@ export function trendingChips(trendingPromise, onPick) {
 /** The sidebar card: loading, then the list, an empty message or an error message. */
 export function trendingSidebar(trendingPromise, onPick) {
   const list = el("div", { className: "trend-content" }, loading("Loading trending topics…"));
-  trendingPromise.then((topics) => {
-    list.replaceChildren(topics.length ? trendList(strongestFirst(topics), onPick) : message(EMPTY));
+  const windowTag = el("span", { className: "trend-window", text: windowLabel(TRENDING_PARAMS.window_hours) });
+  const captionLine = el("p", { className: "trend-caption", text: caption(TRENDING_PARAMS.window_hours) });
+  trendingPromise.then(({ topics, windowHours }) => {
+    windowTag.textContent = windowLabel(windowHours);
+    captionLine.textContent = caption(windowHours);
+    if (topics.length === 0) {
+      list.replaceChildren(message(NO_TRENDING_TEXT));
+      return;
+    }
+    const notice = fallbackNotice(windowHours);
+    list.replaceChildren(...[
+      notice ? el("p", { className: "state state-hint", text: notice }) : null,
+      trendList(strongestFirst(topics), onPick),
+    ].filter(Boolean));
   }).catch(() => list.replaceChildren(message(UNAVAILABLE)));
   return el("aside", { className: "card search-sidebar", "aria-label": "Trending topics" }, [
     el("div", { className: "trend-header" }, [
       el("h2", { className: "trend-title", text: "Trending topics" }),
-      el("span", { className: "trend-window", text: `${TRENDING_PARAMS.window_hours}h` }),
+      windowTag,
     ]),
     list,
-    el("p", { className: "trend-caption", text: caption() }),
+    captionLine,
   ]);
 }
 
-function caption() {
-  const { window_hours: hours, baseline_days: days } = TRENDING_PARAMS;
-  return `Score compares the last ${hours} hours with the usual level over the previous ${days} days. Approximate.`;
+function caption(windowHours) {
+  const days = TRENDING_PARAMS.baseline_days;
+  return `Score compares the last ${windowPhrase(windowHours)} with the usual level over the previous ${days} days. Approximate.`;
 }
 
 function message(text) {

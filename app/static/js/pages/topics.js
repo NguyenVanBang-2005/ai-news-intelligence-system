@@ -34,14 +34,14 @@ async function loadPage(body) {
       request("/api/v1/ai/topics"),
       request(articlesPath(null, 1)),
       request(articlesPath(OUTLIER_LABEL, 1)),
-      fetchTrending().catch(() => []), // the page still works without trending badges
+      fetchTrending().catch(() => ({ topics: [] })), // the page still works without trending badges
     ]);
     if (!body.isConnected) return; // the user has left the page
     body.replaceChildren(...pageContent({
       topics: Array.isArray(topics) ? topics : [],
       total: all?.total ?? 0,
       outlierCount: outliers?.total ?? 0,
-      trendingLabels: new Set(trending.map((item) => item.topic)),
+      trendingLabels: new Set(trending.topics.map((item) => item.topic)),
     }));
   } catch (error) {
     if (body.isConnected) body.replaceChildren(errorState(error, body));

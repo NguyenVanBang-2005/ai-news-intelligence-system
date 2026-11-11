@@ -5,7 +5,7 @@ import { request } from "../api.js";
 import { loading } from "../components.js";
 import { el } from "../dom.js";
 import { formatCount, formatShortDay } from "../format.js";
-import { TRENDING_PARAMS } from "../trending.js";
+import { fallbackNotice, fetchTrending, TRENDING_PARAMS, windowPhrase } from "../trending.js";
 import { labelKeywords } from "./topic-cards.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -13,9 +13,10 @@ const CHART_DAYS = 7;
 const CHART_TOPICS = 5;
 const CHART = { width: 280, height: 64, gap: 4, minBar: 1 };
 
-export function timeseriesPath() {
-  const { window_hours, baseline_days, min_articles } = TRENDING_PARAMS;
-  const params = { days: CHART_DAYS, limit: CHART_TOPICS, window_hours, baseline_days, min_articles };
+/** The chart request; windowHours picks the trending topics (the window the sidebar uses). */
+export function timeseriesPath(windowHours = TRENDING_PARAMS.window_hours) {
+  const { baseline_days, min_articles } = TRENDING_PARAMS;
+  const params = { days: CHART_DAYS, limit: CHART_TOPICS, window_hours: windowHours, baseline_days, min_articles };
   return `/api/v1/topics/timeseries?${new URLSearchParams(params)}`;
 }
 
@@ -34,17 +35,23 @@ export function timeseriesSection() {
 
 async function loadSeries(body) {
   try {
-    const series = await request(timeseriesPath());
+    // Same window as the trending list: the wider one when the last 24 hours had no topic.
+    const { windowHours } = await fetchTrending().catch(() => ({ windowHours: TRENDING_PARAMS.window_hours }));
+    const series = await request(timeseriesPath(windowHours));
     const usable = Array.isArray(series) ? series.filter((item) => Array.isArray(item.points)) : [];
-    if (usable.length === 0) body.replaceChildren(message(emptyText()));
-    else body.replaceChildren(...[dateAxis(usable), seriesList(usable)].filter(Boolean));
+    const notice = fallbackNotice(windowHours);
+    if (usable.length === 0) body.replaceChildren(message(emptyText(windowHours)));
+    else body.replaceChildren(...[
+      notice ? el("p", { className: "state state-hint", text: notice }) : null,
+      dateAxis(usable), seriesList(usable),
+    ].filter(Boolean));
   } catch {
     body.replaceChildren(message("The chart is unavailable right now."));
   }
 }
 
-function emptyText() {
-  return `No topic is trending in the last ${TRENDING_PARAMS.window_hours} hours, so there is nothing to chart.`;
+function emptyText(windowHours) {
+  return `No topic is trending in the last ${windowPhrase(windowHours)}, so there is nothing to chart.`;
 }
 
 function message(text) {

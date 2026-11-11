@@ -5,6 +5,7 @@ Public scripts are app.js and app/static/js/; admin scripts are app/static/admin
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -282,3 +283,70 @@ def test_admin_sources_have_an_enable_disable_button() -> None:
     assert 'turnOn ? "Enabling…" : "Disabling…"' in sources
     assert "row.replaceWith(fresh);" in sources
     assert ".btn-toggle" in STYLE
+
+
+# --- Trending: a wider window when the last 24 hours are empty ------------------------
+
+TRENDING_JS = STATIC_DIR / "js" / "trending.js"
+TRENDING_UI_JS = STATIC_DIR / "js" / "pages" / "trending-ui.js"
+TOPIC_CHART_JS = STATIC_DIR / "js" / "pages" / "topic-chart.js"
+
+
+def test_trending_fallback_window_is_the_widest_the_api_accepts() -> None:
+    routes = Path(__file__).resolve().parents[1] / "app" / "api" / "routes" / "topics.py"
+    api_max = re.search(r"WindowHours = Annotated\[\s*int, Query\(ge=1, le=(\d+)", read(routes))
+    trending = read(TRENDING_JS)
+
+    assert api_max, "window_hours limit not found in app/api/routes/topics.py"
+    assert f"export const FALLBACK_WINDOW_HOURS = {api_max.group(1)};" in trending
+    assert "window_hours: 24," in trending  # the first request is still the last 24 hours
+
+
+def test_trending_asks_the_wider_window_only_when_the_first_is_empty() -> None:
+    trending = read(TRENDING_JS)
+
+    assert (
+        "if (topics.length > 0) return { topics, windowHours: TRENDING_PARAMS.window_hours };"
+        in trending
+    )
+    assert "window_hours: FALLBACK_WINDOW_HOURS" in trending
+    # The result always says which window it is for, so no page can pass it off as 24 hours.
+    assert "windowHours: FALLBACK_WINDOW_HOURS" in trending
+
+
+def test_trending_fallback_texts() -> None:
+    trending = read(TRENDING_JS)
+
+    assert (
+        "`No trending topics in the last ${windowPhrase(TRENDING_PARAMS.window_hours)}. ` +"
+        in trending
+    )
+    assert "`Showing the last ${windowPhrase(windowHours)}.`" in trending
+    assert "return hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;" in trending
+    assert (
+        '"No topics yet. An administrator can run the demo seed script to load articles."'
+        in trending
+    )
+
+
+def test_trending_sidebar_and_chips_show_the_window_in_use() -> None:
+    ui = read(TRENDING_UI_JS)
+
+    assert "trendingPromise.then(({ topics, windowHours }) => {" in ui
+    assert "windowTag.textContent = windowLabel(windowHours);" in ui
+    assert "captionLine.textContent = caption(windowHours);" in ui
+    assert 'notice ? el("p", { className: "state state-hint", text: notice }) : null,' in ui
+    assert "list.replaceChildren(message(NO_TRENDING_TEXT));" in ui
+    assert "`Trending (last ${windowPhrase(windowHours)}):`" in ui
+    # The notice reuses existing classes; no new CSS (and so no new animation).
+    assert ".state-hint {" in STYLE
+
+
+def test_topics_chart_and_badges_use_the_same_window() -> None:
+    chart = read(TOPIC_CHART_JS)
+    topics = read(STATIC_DIR / "js" / "pages" / "topics.js")
+
+    assert "const { windowHours } = await fetchTrending()" in chart
+    assert "request(timeseriesPath(windowHours))" in chart
+    assert "window_hours: windowHours" in chart
+    assert "trending.topics.map((item) => item.topic)" in topics

@@ -10,7 +10,7 @@ Examples (from the repo root, or inside the API container):
     python scripts/create_admin.py --username alice                    # new admin account
     python scripts/create_admin.py --username alice --reset-password   # new password only
     python scripts/create_admin.py --username alice --promote          # existing -> admin
-    docker exec -it ainis_main-api-1 python scripts/create_admin.py --username alice
+    docker compose exec api python scripts/create_admin.py --username alice  # Docker
 """
 
 import argparse
