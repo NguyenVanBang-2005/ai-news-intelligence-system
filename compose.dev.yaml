@@ -1,6 +1,7 @@
-# Local development only: `docker compose up` merges this file automatically.
-# It exposes the DB on localhost so host-side Python (tests, alembic) can reach it.
-# Use `-f compose.yaml` to run without it (DB stays private to the Docker network).
+# Local development only, never loaded by a plain `docker compose up` (the file is not
+# named compose.override.yaml on purpose). It exposes the DB on localhost so host-side
+# Python (tests, alembic) can reach it:
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
 services:
   db:
     ports:
