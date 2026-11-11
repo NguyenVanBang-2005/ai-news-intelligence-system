@@ -1,3 +1,4 @@
+NOTE: this run aborted during test collection (6 import errors from scikit-learn in this .venv). See test_results_4275dad.txt for the complete run.
 
 =================================== ERRORS ====================================
 _________________ ERROR collecting tests/test_ai_pipeline.py __________________
